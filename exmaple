@@ -1,57 +1,72 @@
 configurations {
-	jaxb
-	compileOnly {
-		extendsFrom annotationProcessor
-	}
+    jaxws
 }
+
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-web-services'
-	compileOnly 'org.projectlombok:lombok'
-	annotationProcessor 'org.projectlombok:lombok'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-
-	// Dependencias para SOAP
-	implementation 'wsdl4j:wsdl4j:1.6.3'
-	implementation 'jakarta.xml.bind:jakarta.xml.bind-api:4.0.1'
-	implementation 'org.glassfish.jaxb:jaxb-runtime:4.0.4'
-
-	// Dependencias para generación de código
-	jaxb 'org.glassfish.jaxb:jaxb-xjc:4.0.4'
-	jaxb 'org.glassfish.jaxb:jaxb-core:4.0.4'
+    jaxws 'com.sun.xml.ws:jaxws-tools:4.0.1'
+    implementation 'com.sun.xml.ws:jaxws-rt:4.0.1'
 }
 
-task genJaxb {
-	ext.sourcesDir = "${buildDir}/generated-sources/jaxb"
-	ext.classesDir = "${buildDir}/classes/jaxb"
-	ext.schemas = [
-			"https://www.dataaccess.com/webservicesserver/NumberConversion.wso?WSDL",
-			"http://webservices.oorsprong.org/websamples.countryinfo/CountryInfoService.wso?WSDL"
-	]
+// Definir los 3 WSDLs con sus paquetes
+def wsdlConfigurations = [
+    [
+        name: "CountryInfo",
+        url: "http://webservices.oorsprong.org/websamples.countryinfo/CountryInfoService.wso?WSDL",
+        pkg: "com.example.demo.wsdl.countryinfo"
+    ],
+    [
+        name: "NumberConversion",
+        url: "https://www.dataaccess.com/webservicesserver/NumberConversion.wso?WSDL",
+        pkg: "com.example.demo.wsdl.numberconversion"
+    ],
+    [
+        name: "OtroServicio",
+        url: "https://tudominio.com/servicio?wsdl",
+        pkg: "com.example.demo.wsdl.otroservicio"
+    ]
+]
 
-	outputs.dir sourcesDir
+// Crear tareas dinámicas para cada WSDL
+wsdlConfigurations.each { config ->
+    task "wsimport${config.name}"(type: Copy) {
+        ext.sourcesDir = "${buildDir}/generated-sources/wsimport/${config.name}"
+        ext.wsdl = config.url
+        ext.pkg = config.pkg
 
-	doLast {
-		project.ant {
-			taskdef name: "xjc", classname: "com.sun.tools.xjc.XJCTask",
-					classpath: configurations.jaxb.asPath
-			mkdir(dir: sourcesDir)
+        doLast {
+            project.ant {
+                taskdef name: 'wsimport',
+                        classname: 'com.sun.tools.ws.ant.WsImport',
+                        classpath: configurations.jaxws.asPath
 
-			schemas.each { schema ->
-				xjc(destdir: sourcesDir, schema: schema, package: "com.example.demo.wsdl") {
-					arg(value: "-wsdl")
-					produces(dir: sourcesDir, includes: "**/*.java")
-				}
-			}
-		}
-	}
+                mkdir(dir: sourcesDir)
+
+                wsimport(
+                    keep: true,
+                    destdir: sourcesDir,
+                    package: ext.pkg,
+                    wsdl: ext.wsdl,
+                    verbose: true,
+                    xnocompile: true
+                )
+            }
+        }
+    }
 }
 
+// Tarea principal que ejecuta todas las generaciones
+task wsimportAll {
+    dependsOn wsdlConfigurations.collect { "wsimport${it.name}" }
+}
 
 sourceSets {
-	main {
-		java {
-			srcDirs += genJaxb.sourcesDir
-		}
-	}
+    main {
+        java {
+            srcDirs += wsdlConfigurations.collect { 
+                tasks.getByName("wsimport${it.name}").sourcesDir 
+            }
+        }
+    }
 }
-compileJava.dependsOn genJaxb
+
+compileJava.dependsOn wsimportAll
