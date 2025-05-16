@@ -1,72 +1,77 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.4.4'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
 configurations {
-    jaxws
+	jaxws
+}
+repositories {
+	mavenCentral()
 }
 
 dependencies {
-    jaxws 'com.sun.xml.ws:jaxws-tools:4.0.1'
-    implementation 'com.sun.xml.ws:jaxws-rt:4.0.1'
+	implementation 'org.springframework.boot:spring-boot-starter-web-services'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	jaxws 'com.sun.xml.ws:jaxws-tools:4.0.1'
+	implementation 'com.sun.xml.ws:jaxws-rt:4.0.1'
+	implementation "org.apache.cxf:cxf-rt-frontend-jaxws:4.1.1"
+	implementation 'org.springframework:spring-webmvc:6.2.5'
+	implementation 'org.springframework:spring-web:6.2.5'
+	implementation 'org.apache.cxf:cxf-rt-frontend-jaxws:4.1.1'
+	implementation 'org.apache.cxf:cxf-rt-transports-http:4.1.1'
+	implementation 'org.apache.cxf:cxf-rt-bindings-soap:4.1.1'
+
+
 }
 
-// Definir los 3 WSDLs con sus paquetes
-def wsdlConfigurations = [
-    [
-        name: "CountryInfo",
-        url: "http://webservices.oorsprong.org/websamples.countryinfo/CountryInfoService.wso?WSDL",
-        pkg: "com.example.demo.wsdl.countryinfo"
-    ],
-    [
-        name: "NumberConversion",
-        url: "https://www.dataaccess.com/webservicesserver/NumberConversion.wso?WSDL",
-        pkg: "com.example.demo.wsdl.numberconversion"
-    ],
-    [
-        name: "OtroServicio",
-        url: "https://tudominio.com/servicio?wsdl",
-        pkg: "com.example.demo.wsdl.otroservicio"
-    ]
-]
-
-// Crear tareas dinámicas para cada WSDL
-wsdlConfigurations.each { config ->
-    task "wsimport${config.name}"(type: Copy) {
-        ext.sourcesDir = "${buildDir}/generated-sources/wsimport/${config.name}"
-        ext.wsdl = config.url
-        ext.pkg = config.pkg
-
-        doLast {
-            project.ant {
-                taskdef name: 'wsimport',
-                        classname: 'com.sun.tools.ws.ant.WsImport',
-                        classpath: configurations.jaxws.asPath
-
-                mkdir(dir: sourcesDir)
-
-                wsimport(
-                    keep: true,
-                    destdir: sourcesDir,
-                    package: ext.pkg,
-                    wsdl: ext.wsdl,
-                    verbose: true,
-                    xnocompile: true
-                )
-            }
-        }
-    }
+tasks.named('test') {
+	useJUnitPlatform()
 }
 
-// Tarea principal que ejecuta todas las generaciones
-task wsimportAll {
-    dependsOn wsdlConfigurations.collect { "wsimport${it.name}" }
+task wsimportNumberConversion {
+	ext.sourcesDir = "${buildDir}/generated-sources/wsimport/NumberConversion"
+	ext.wsdl = "https://www.dataaccess.com/webservicesserver/NumberConversion.wso?WSDL"
+	ext.pkg = "com.dataaccess.webservicesserver" // Paquete definido en el WSDL
+
+	doLast {
+		project.ant {
+			taskdef name: 'wsimport',
+					classname: 'com.sun.tools.ws.ant.WsImport',
+					classpath: configurations.jaxws.asPath
+
+			mkdir(dir: sourcesDir)
+
+			wsimport(
+					keep: true,
+					destdir: sourcesDir,
+					package: ext.pkg,
+					wsdl: ext.wsdl,
+					verbose: true,
+					xnocompile: true
+			)
+		}
+	}
 }
 
+// Incluir los archivos generados en el classpath
 sourceSets {
-    main {
-        java {
-            srcDirs += wsdlConfigurations.collect { 
-                tasks.getByName("wsimport${it.name}").sourcesDir 
-            }
-        }
-    }
+	main {
+		java {
+			srcDirs += wsimportNumberConversion.sourcesDir
+		}
+	}
 }
 
-compileJava.dependsOn wsimportAll
+compileJava.dependsOn wsimportNumberConversion
