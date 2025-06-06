@@ -16,6 +16,20 @@ With SonarQube for IDE, clean code as you write it in your IDE.
 When a feature is ready, analyze your pull request (commercial edition only) and make sure no issue is missed.
 Finally, rely on a thorough branch analysis to ensure the new code is clean.
 
+1) El poder del nuevo código
+Limpiar solo el nuevo código es más fácil y garantiza que no se añadirá deuda. A medida que cambias el código viejo, también se vuelve más limpio con el tiempo. A esto lo llamamos 'Limpio a medida que codificas'.
+
+2) Define tu nuevo código
+Tu equipo u organización decide cuándo debería comenzar un nuevo período de código para tu proyecto, por ejemplo, cada vez que se libera un proyecto.
+
+3) Verde es limpio
+El estado de la puerta de calidad te dice si tu nuevo código es limpio o no. Manténlo verde tan a menudo como sea posible, y tu proyecto estará listo para producción.
+
+4) Limpio en todos los niveles
+Con SonarQube para IDE, escribe código limpio mientras lo escribes en tu IDE.
+Cuando una función esté lista, analiza tu solicitud de extracción (solo edición comercial) y asegúrate de que no se pase por alto ningún problema.
+Finalmente, confía en un análisis exhaustivo de la rama para asegurar que el nuevo código esté limpio.
+
 sonar-project.properties
 
 # Project identification
