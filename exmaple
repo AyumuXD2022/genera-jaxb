@@ -1,77 +1,33 @@
-plugins {
-	id 'java'
-	id 'org.springframework.boot' version '3.4.4'
-	id 'io.spring.dependency-management' version '1.1.7'
-}
+1) The power of new code
 
-group = 'com.example'
-version = '0.0.1-SNAPSHOT'
+Cleaning only new code is easier and guarantees no debt will be added. As you change old code, it also gets cleaner over time. We call this ‘Clean as You Code’.
 
-java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(21)
-	}
-}
+2) Define your new code
 
-configurations {
-	jaxws
-}
-repositories {
-	mavenCentral()
-}
+Your team or organization decides when a new code period for your project should start, for example, each time a project is released.
 
-dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-web-services'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-	jaxws 'com.sun.xml.ws:jaxws-tools:4.0.1'
-	implementation 'com.sun.xml.ws:jaxws-rt:4.0.1'
-	implementation "org.apache.cxf:cxf-rt-frontend-jaxws:4.1.1"
-	implementation 'org.springframework:spring-webmvc:6.2.5'
-	implementation 'org.springframework:spring-web:6.2.5'
-	implementation 'org.apache.cxf:cxf-rt-frontend-jaxws:4.1.1'
-	implementation 'org.apache.cxf:cxf-rt-transports-http:4.1.1'
-	implementation 'org.apache.cxf:cxf-rt-bindings-soap:4.1.1'
+3) Green is clean
 
+Quality Gate Status tells you if your new code is clean or not. Keep it green as often as possible, and your project will be production-ready.
 
-}
+4) Clean at all levels
 
-tasks.named('test') {
-	useJUnitPlatform()
-}
+With SonarQube for IDE, clean code as you write it in your IDE.
+When a feature is ready, analyze your pull request (commercial edition only) and make sure no issue is missed.
+Finally, rely on a thorough branch analysis to ensure the new code is clean.
 
-task wsimportNumberConversion {
-	ext.sourcesDir = "${buildDir}/generated-sources/wsimport/NumberConversion"
-	ext.wsdl = "https://www.dataaccess.com/webservicesserver/NumberConversion.wso?WSDL"
-	ext.pkg = "com.dataaccess.webservicesserver" // Paquete definido en el WSDL
+sonar-project.properties
 
-	doLast {
-		project.ant {
-			taskdef name: 'wsimport',
-					classname: 'com.sun.tools.ws.ant.WsImport',
-					classpath: configurations.jaxws.asPath
+# Project identification
+sonar.projectKey=money_loanstest
+sonar.projectName=Money Loans
+sonar.projectVersion=1.0
 
-			mkdir(dir: sourcesDir)
+# Source settings
+sonar.sources=src
+sonar.java.binaries=target/classes
+sonar.sourceEncoding=UTF-8
 
-			wsimport(
-					keep: true,
-					destdir: sourcesDir,
-					package: ext.pkg,
-					wsdl: ext.wsdl,
-					verbose: true,
-					xnocompile: true
-			)
-		}
-	}
-}
-
-// Incluir los archivos generados en el classpath
-sourceSets {
-	main {
-		java {
-			srcDirs += wsimportNumberConversion.sourcesDir
-		}
-	}
-}
-
-compileJava.dependsOn wsimportNumberConversion
+# Server connection
+sonar.host.url=http://127.0.0.1:9000
+sonar.token=sqa_24301bea1eda032f7a5486675cc88826bcabeb91
