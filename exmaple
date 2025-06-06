@@ -1,3 +1,4 @@
+Ingles 
 1) The power of new code
 
 Cleaning only new code is easier and guarantees no debt will be added. As you change old code, it also gets cleaner over time. We call this ‘Clean as You Code’.
@@ -15,7 +16,7 @@ Quality Gate Status tells you if your new code is clean or not. Keep it green as
 With SonarQube for IDE, clean code as you write it in your IDE.
 When a feature is ready, analyze your pull request (commercial edition only) and make sure no issue is missed.
 Finally, rely on a thorough branch analysis to ensure the new code is clean.
-
+Español 
 1) El poder del nuevo código
 Limpiar solo el nuevo código es más fácil y garantiza que no se añadirá deuda. A medida que cambias el código viejo, también se vuelve más limpio con el tiempo. A esto lo llamamos 'Limpio a medida que codificas'.
 
