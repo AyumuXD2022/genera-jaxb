@@ -14,3 +14,10 @@ String sanitized = currencyCode
             .replaceAll("[^A-Za-z]", "")                // Solo letras
             .toUpperCase()                              // Convertir a mayúsculas
             .trim();
+   String sanitized = accountNumber
+        .replaceAll("[\r\n\t\x00<>"'&=;]", "")  // Caracteres peligrosos
+        .replaceAll("javascript:", "")               // URLs maliciosas
+        .replaceAll("data:", "")                     // Data URLs
+        .toLowerCase()                               // Convertir a minúsculas
+        .replaceAll("[^a-z0-9\-]", "")             // Solo minúsculas, números y guiones
+        .trim();
