@@ -1,0 +1,16 @@
+String sanitized = amountStr
+                    .replaceAll("[\r\n\t\x00<>"'&=;()]", "")  // Caracteres peligrosos
+                    .replaceAll("--", "")                       // Comentarios SQL
+                    .replaceAll("/\.?\*/", "")              // Comentarios SQL
+                    .replaceAll("(?i)(union|select|insert|update|delete|drop|create|alter)", "") // SQL keywords
+                    .replaceAll("[^0-9.-]", "")                 // Solo números, punto y guión
+                    .trim();
+
+String sanitized = currencyCode
+            .replaceAll("[\r\n\t\x00<>"'&=;()]", "")  // Caracteres peligrosos
+            .replaceAll("--", "")                       // Comentarios SQL
+            .replaceAll("/\.?\*/", "")              // Comentarios SQL multilinea
+            .replaceAll("(?i)(union|select|insert|update|delete|drop|create|alter)", "") // SQL keywords
+            .replaceAll("[^A-Za-z]", "")                // Solo letras
+            .toUpperCase()                              // Convertir a mayúsculas
+            .trim();
