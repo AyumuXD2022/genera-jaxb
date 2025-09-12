@@ -1,0 +1,240 @@
+package mx.com.backend.auth_service.components;
+
+import io.jsonwebtoken.*;
+import mx.com.backend.auth_service.entities.UserEntity;
+import mx.com.backend.auth_service.repositories.UserRepository;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.openssl.PEMDecryptorProvider;
+import org.bouncycastle.openssl.PEMEncryptedKeyPair;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.openssl.jcajce.JcePEMDecryptorProviderBuilder;
+import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
+import org.bouncycastle.pkcs.PKCSException;
+import org.bouncycastle.pkcs.jcajce.JcePKCSPBEInputDecryptorProviderBuilder;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PrivateKey;
+import java.security.Security;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
+import java.util.Date;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Component
+public class JwtTokenUtil {
+
+    private final RSAPrivateKey privateKey;
+    private final RSAPublicKey publicKey;
+    private final long expiration;
+    private final String issuer;
+    private final UserRepository userRepository;
+    private static final long REFRESH_TOKEN_EXPIRATION_MS = 15L * 24 * 60 * 60 * 1000; // 15 días
+
+    static {
+        // Registrar Bouncy Castle provider
+        Security.addProvider(new BouncyCastleProvider());
+    }
+
+    public JwtTokenUtil(
+            @Value("${jwt.private-key-path}") String privateKeyPath,
+            @Value("${jwt.public-key-path}") String publicKeyPath,
+            @Value("${jwt.private-key-password}") String privateKeyPassword,
+            @Value("${jwt.expiration}") long expiration,
+            @Value("${jwt.issuer}") String issuer,
+            UserRepository userRepository) throws Exception {
+
+        this.privateKey = loadPrivateKeyWithBC(privateKeyPath, privateKeyPassword);
+        this.publicKey = loadPublicKey(publicKeyPath);
+        this.expiration = expiration * 1000;
+        this.issuer = issuer;
+        this.userRepository = userRepository;
+    }
+
+    private RSAPrivateKey loadPrivateKeyWithBC(String path, String password) throws Exception {
+        try (InputStream inputStream = new ClassPathResource(path).getInputStream();
+             PEMParser pemParser = new PEMParser(new InputStreamReader(inputStream))) {
+
+            Object object = pemParser.readObject();
+            JcaPEMKeyConverter converter = new JcaPEMKeyConverter().setProvider("BC");
+
+            if (object instanceof PKCS8EncryptedPrivateKeyInfo) {
+                // PKCS#8 encriptado
+                PKCS8EncryptedPrivateKeyInfo encryptedInfo = (PKCS8EncryptedPrivateKeyInfo) object;
+
+                try {
+                    // Desencriptar usando el password
+                    JcePKCSPBEInputDecryptorProviderBuilder decryptorProviderBuilder =
+                            new JcePKCSPBEInputDecryptorProviderBuilder();
+                    decryptorProviderBuilder.setProvider("BC");
+
+                    PrivateKeyInfo privateKeyInfo = encryptedInfo.decryptPrivateKeyInfo(
+                            decryptorProviderBuilder.build(password.toCharArray())
+                    );
+
+                    PrivateKey privateKey = converter.getPrivateKey(privateKeyInfo);
+
+                    if (privateKey instanceof RSAPrivateKey) {
+                        return (RSAPrivateKey) privateKey;
+                    } else {
+                        throw new IllegalArgumentException("La clave privada no es una clave RSA");
+                    }
+                } catch (PKCSException e) {
+                    throw new RuntimeException("Error al desencriptar la clave privada. Verifica el password.", e);
+                }
+
+            } else if (object instanceof PEMEncryptedKeyPair) {
+                // Clave encriptada con formato PEM tradicional
+                PEMDecryptorProvider decProv = new JcePEMDecryptorProviderBuilder()
+                        .build(password.toCharArray());
+                PEMKeyPair keyPair = ((PEMEncryptedKeyPair) object).decryptKeyPair(decProv);
+                PrivateKey privateKey = converter.getPrivateKey(keyPair.getPrivateKeyInfo());
+
+                if (privateKey instanceof RSAPrivateKey) {
+                    return (RSAPrivateKey) privateKey;
+                } else {
+                    throw new IllegalArgumentException("La clave privada no es una clave RSA");
+                }
+
+            } else if (object instanceof PEMKeyPair) {
+                // Clave no encriptada
+                PEMKeyPair keyPair = (PEMKeyPair) object;
+                PrivateKey privateKey = converter.getPrivateKey(keyPair.getPrivateKeyInfo());
+
+                if (privateKey instanceof RSAPrivateKey) {
+                    return (RSAPrivateKey) privateKey;
+                } else {
+                    throw new IllegalArgumentException("La clave privada no es una clave RSA");
+                }
+
+            } else if (object instanceof PrivateKeyInfo) {
+                // PrivateKeyInfo directamente (PKCS#8 sin encriptar)
+                PrivateKeyInfo privateKeyInfo = (PrivateKeyInfo) object;
+                PrivateKey privateKey = converter.getPrivateKey(privateKeyInfo);
+
+                if (privateKey instanceof RSAPrivateKey) {
+                    return (RSAPrivateKey) privateKey;
+                } else {
+                    throw new IllegalArgumentException("La clave privada no es una clave RSA");
+                }
+
+            } else {
+                throw new IllegalArgumentException("Formato de clave privada no soportado: " +
+                        (object != null ? object.getClass().getName() : "null"));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Error loading private key from: " + path, e);
+        }
+    }
+
+    private RSAPublicKey loadPublicKey(String path) throws Exception {
+        try (InputStream inputStream = new ClassPathResource(path).getInputStream()) {
+            String publicKeyPem = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8)
+                    .replace("-----BEGIN PUBLIC KEY-----", "")
+                    .replace("-----END PUBLIC KEY-----", "")
+                    .replaceAll("\\s", "");
+
+            byte[] decoded = Base64.getDecoder().decode(publicKeyPem);
+            X509EncodedKeySpec keySpec = new X509EncodedKeySpec(decoded);
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+            return (RSAPublicKey) keyFactory.generatePublic(keySpec);
+        } catch (Exception e) {
+            throw new RuntimeException("Error loading public key from: " + path, e);
+        }
+    }
+
+    public String generateAccessToken(UserDetails user, boolean refresh) {
+        Date now = new Date();
+        UserEntity userEntity = userRepository.findByEmail(user.getUsername())
+                .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado con email: " + user.getUsername()));
+
+        Set<String> authorities = user.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+
+        if(refresh){
+            Date refreshExpiry = new Date(now.getTime() + REFRESH_TOKEN_EXPIRATION_MS);
+            return Jwts.builder()
+                    .claim("jti", UUID.randomUUID().toString())
+                    .subject(user.getUsername())
+                    .claim("token_type", "refresh")
+                    .issuer(issuer)
+                    .issuedAt(now)
+                    .expiration(refreshExpiry)
+                    .signWith(privateKey, Jwts.SIG.RS512)
+                    .compact();
+        }else{
+            Date expiry = new Date(now.getTime() + expiration);
+            return Jwts.builder()
+                    .claim("jti", UUID.randomUUID().toString())
+                    .subject(user.getUsername())
+                    .claim("name", userEntity.getName())
+                    .claim("roles", authorities)
+                    .issuer(issuer)
+                    .issuedAt(now)
+                    .expiration(expiry)
+                    .signWith(privateKey, Jwts.SIG.RS512)
+                    .compact();
+        }
+    }
+
+    public Jws<Claims> validateToken(String token) {
+        try {
+            return Jwts.parser()
+                    .verifyWith(publicKey)
+                    .build()
+                    .parseSignedClaims(token);
+        } catch (ExpiredJwtException e) {
+            throw new RuntimeException("Token expirado", e);
+        } catch (JwtException e) {
+            throw new RuntimeException("Token inválido", e);
+        }
+    }
+
+    public String getUsernameFromToken(String token) {
+        return validateToken(token).getPayload().getSubject();
+    }
+
+    public boolean isTokenExpired(String token) {
+        return validateToken(token).getPayload().getExpiration().before(new Date());
+    }
+
+    public Date getExpirationDate(String token) {
+        return validateToken(token).getPayload().getExpiration();
+    }
+
+    public Set<String> getRoles(String token) {
+        Claims claims = validateToken(token).getPayload();
+        return Set.copyOf((java.util.List<String>) claims.get("roles"));
+    }
+
+    public String getTokenType(String token) {
+        Claims claims = validateToken(token).getPayload();
+        return claims.get("token_type", String.class);
+    }
+
+    public boolean isRefreshToken(String token) {
+        return "refresh".equals(getTokenType(token));
+    }
+
+    public boolean isAccessToken(String token) {
+        return !isRefreshToken(token);
+    }
+}
