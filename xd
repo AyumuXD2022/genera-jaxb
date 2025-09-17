@@ -1,0 +1,48 @@
+@Component
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+    
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response,
+                       AuthenticationException authException) throws IOException {
+        
+        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+        response.setContentType("application/json");
+        
+        Map<String, Object> error = new HashMap<>();
+        error.put("message", "No autenticado");
+        error.put("description", "Credenciales inválidas o faltantes");
+        error.put("code", 401);
+        error.put("category", "Unauthorized");
+        error.put("action", "provide_valid_token");
+        error.put("severity", "ERROR");
+        
+        new ObjectMapper().writeValue(response.getWriter(), error);
+    }
+}
+
+@Component
+public class CustomAccessDeniedHandler implements AccessDeniedHandler {
+    
+    @Override
+    public void handle(HttpServletRequest request, HttpServletResponse response,
+                      AccessDeniedException accessDeniedException) throws IOException {
+        
+        response.setStatus(HttpStatus.FORBIDDEN.value());
+        response.setContentType("application/json");
+        
+        Map<String, Object> error = new HashMap<>();
+        error.put("message", "Acceso denegado");
+        error.put("description", "No tienes permisos para acceder a este recurso");
+        error.put("code", 403);
+        error.put("category", "Forbidden");
+        error.put("action", "request_higher_privileges");
+        error.put("severity", "WARN");
+        
+        new ObjectMapper().writeValue(response.getWriter(), error);
+    }
+}
+
+.exceptionHandling(exception -> exception
+                .authenticationEntryPoint(authenticationEntryPoint) // 401
+                .accessDeniedHandler(accessDeniedHandler)           // 403
+            );
