@@ -46,3 +46,99 @@ public class CustomAccessDeniedHandler implements AccessDeniedHandler {
                 .authenticationEntryPoint(authenticationEntryPoint) // 401
                 .accessDeniedHandler(accessDeniedHandler)           // 403
             );
+
+
+
+
+
+
+------------
+package mx.com.backend.auth_service.components;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+@Slf4j
+@Component
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response,
+                       AuthenticationException authException) throws IOException, ServletException {
+        
+        log.error("🚫 Error de autenticación: {} - Path: {}", 
+                 authException.getMessage(), request.getRequestURI());
+        
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        
+        String errorDescription = getErrorDescription(authException);
+        String action = getAction(authException);
+        
+        Map<String, Object> error = new HashMap<>();
+        error.put("message", "Acceso no autorizado");
+        error.put("description", errorDescription);
+        error.put("code", 401);
+        error.put("category", "Unauthorized");
+        error.put("path", request.getRequestURI());
+        error.put("timestamp", LocalDateTime.now().toString());
+        error.put("action", action);
+        error.put("uuid", UUID.randomUUID().toString());
+        error.put("severity", "ERROR");
+        
+        // Asegúrate de escribir la respuesta correctamente
+        objectMapper.writeValue(response.getWriter(), error);
+        response.getWriter().flush();
+    }
+    
+    private String getErrorDescription(AuthenticationException authException) {
+        String exceptionMessage = authException.getMessage();
+        
+        if (exceptionMessage.contains("JWT expired")) {
+            return "El token JWT ha expirado. Por favor, obtén un nuevo token de autenticación.";
+        } else if (exceptionMessage.contains("JWT signature") || exceptionMessage.contains("signature")) {
+            return "La firma del token JWT no es válida. El token puede haber sido alterado.";
+        } else if (exceptionMessage.contains("Unable to parse") || exceptionMessage.contains("malformed")) {
+            return "El formato del token JWT es inválido. Verifica que el token esté correctamente formado.";
+        } else if (exceptionMessage.contains("Full authentication is required")) {
+            return "Se requiere autenticación completa para acceder a este recurso. Por favor, proporciona un token válido.";
+        } else {
+            return "Error de autenticación: " + authException.getMessage();
+        }
+    }
+    
+    private String getAction(AuthenticationException authException) {
+        String exceptionMessage = authException.getMessage();
+        
+        if (exceptionMessage.contains("JWT expired")) {
+            return "refresh_token";
+        } else if (exceptionMessage.contains("JWT signature") || exceptionMessage.contains("Unable to parse")) {
+            return "request_new_token";
+        } else if (exceptionMessage.contains("Full authentication is required")) {
+            return "provide_credentials";
+        } else {
+            return "contact_support";
+        }
+    }
+}
+
+
+
+
+.authenticationEntryPoint(jwtAuthenticationEntryPoint) 
