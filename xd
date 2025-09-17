@@ -142,3 +142,122 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
 
 .authenticationEntryPoint(jwtAuthenticationEntryPoint) 
+
+
+
+----------------------
+
+
+
+package mx.com.backend.auth_service.components;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.server.resource.BearerTokenError;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
+@Slf4j
+@Component
+public class OAuth2AuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+    private final BearerTokenAuthenticationEntryPoint delegate = new BearerTokenAuthenticationEntryPoint();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response,
+                       AuthenticationException authException) throws IOException, ServletException {
+        
+        log.error("🚫 OAuth2 Authentication Error: {} - Path: {}",
+                 authException.getMessage(), request.getRequestURI());
+
+        // Primero delegamos en el entry point por defecto de OAuth2 para establecer el WWW-Authenticate header
+        delegate.commence(request, response, authException);
+        
+        // Luego sobrescribimos la respuesta con nuestro formato JSON
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        
+        Map<String, Object> error = buildErrorResponse(request, authException);
+        objectMapper.writeValue(response.getWriter(), error);
+    }
+
+    private Map<String, Object> buildErrorResponse(HttpServletRequest request, AuthenticationException authException) {
+        String errorDescription = getErrorDescription(authException);
+        String errorCode = getErrorCode(authException);
+        
+        Map<String, Object> error = new LinkedHashMap<>();
+        error.put("message", "Acceso no autorizado");
+        error.put("description", errorDescription);
+        error.put("code", 401);
+        error.put("error_code", errorCode);
+        error.put("category", "Unauthorized");
+        error.put("path", request.getRequestURI());
+        error.put("timestamp", LocalDateTime.now().toString());
+        error.put("action", getAction(authException));
+        error.put("uuid", UUID.randomUUID().toString());
+        error.put("severity", "ERROR");
+        
+        return error;
+    }
+
+    private String getErrorDescription(AuthenticationException authException) {
+        if (authException.getCause() instanceof BearerTokenError bearerTokenError) {
+            return switch (bearerTokenError.getErrorCode()) {
+                case "invalid_token" -> "Token de acceso inválido o malformado";
+                case "insufficient_scope" -> "El token no tiene los scopes requeridos";
+                case "invalid_request" -> "Solicitud de autenticación inválida";
+                default -> "Error de autenticación OAuth2: " + bearerTokenError.getDescription();
+            };
+        }
+        
+        String exceptionMessage = authException.getMessage();
+        if (exceptionMessage.contains("expired")) {
+            return "El token de acceso ha expirado";
+        } else if (exceptionMessage.contains("signature")) {
+            return "Firma del token inválida";
+        } else if (exceptionMessage.contains("malformed")) {
+            return "Token malformado";
+        }
+        
+        return "Error de autenticación: " + authException.getMessage();
+    }
+
+    private String getErrorCode(AuthenticationException authException) {
+        if (authException.getCause() instanceof BearerTokenError bearerTokenError) {
+            return bearerTokenError.getErrorCode();
+        }
+        return "invalid_token";
+    }
+
+    private String getAction(AuthenticationException authException) {
+        String errorCode = getErrorCode(authException);
+        
+        return switch (errorCode) {
+            case "invalid_token", "expired" -> "refresh_token";
+            case "insufficient_scope" -> "request_higher_privileges";
+            case "invalid_request" -> "provide_valid_credentials";
+            default -> "contact_support";
+        };
+    }
+}
+
+
+.oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .jwtAuthenticationConverter(jwtAuthenticationConverter())
+                )
+                .authenticationEntryPoint(oauth2AuthenticationEntryPoint) // ¡ESTO ES CLAVE!
+            );
