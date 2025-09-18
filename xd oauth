@@ -349,3 +349,25 @@ public class JwtDecoderWithX5c {
         }
     }
 }
+@Bean
+    public JwtDecoder jwtDecoder() {
+        if (useX5c) {
+            log.info("🔐 Configuración: Usando x5c para validación JWT");
+            log.info("  - JWK Set URI: {}", jwkSetUri);
+            log.info("  - Validar cadena: {}", validateCertChain);
+            log.info("  - Cache TTL: {} segundos", cacheTtl);
+            
+            return new JwtDecoderWithX5c.X5cBasedJwtDecoder(
+                    jwkSetUri, 
+                    validateCertChain, 
+                    cacheTtl
+            );
+        } else {
+            log.info("📌 Configuración: Usando validación estándar (n y e)");
+            log.info("  - JWK Set URI: {}", jwkSetUri);
+            
+            return NimbusJwtDecoder.withJwkSetUri(jwkSetUri)
+                    .jwsAlgorithm(SignatureAlgorithm.RS256)
+                    .build();
+        }
+    }
