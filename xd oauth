@@ -1,0 +1,351 @@
+package mx.com.backend.gateway_service.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.crypto.RSASSAVerifier;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.util.Base64;
+import com.nimbusds.jwt.SignedJWT;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.jwt.*;
+import org.springframework.web.client.RestTemplate;
+
+import java.io.ByteArrayInputStream;
+import java.net.URL;
+import java.security.PublicKey;
+import java.security.cert.*;
+import java.security.interfaces.RSAPublicKey;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * JwtDecoder que obtiene la llave pública desde los certificados x5c
+ * del JWK Set en lugar de usar directamente n y e
+ */
+@Configuration
+public class JwtDecoderWithX5c {
+    
+    private static final Logger log = LoggerFactory.getLogger(JwtDecoderWithX5c.class);
+    
+    @Value("${spring.security.oauth2.resourceserver.jwt.jwk-set-uri}")
+    private String jwkSetUri;
+    
+    @Value("${app.jwt.validate-cert-chain:true}")
+    private boolean validateCertificateChain;
+    
+    @Value("${app.jwt.cache-ttl-seconds:300}")
+    private int cacheTtlSeconds;
+    
+    /**
+     * Bean principal - JwtDecoder que usa x5c
+     */
+    @Bean
+    public JwtDecoder x5cJwtDecoder() {
+        log.info("🔐 Configurando JwtDecoder basado en certificados X.509 (x5c)");
+        log.info("📍 JWK Set URI: {}", jwkSetUri);
+        log.info("🔗 Validación de cadena: {}", validateCertificateChain);
+        
+        return new X5cBasedJwtDecoder(jwkSetUri, validateCertificateChain, cacheTtlSeconds);
+    }
+    
+    /**
+     * Implementación del JwtDecoder que usa x5c
+     */
+    public static class X5cBasedJwtDecoder implements JwtDecoder {
+        
+        private static final Logger log = LoggerFactory.getLogger(X5cBasedJwtDecoder.class);
+        
+        private final String jwkSetUri;
+        private final boolean validateChain;
+        private final int cacheTtlSeconds;
+        private final CertificateFactory certificateFactory;
+        private final RestTemplate restTemplate = new RestTemplate();
+        private final ObjectMapper objectMapper = new ObjectMapper();
+        
+        // Cache del JWK Set completo
+        private volatile CachedJwkSet cachedJwkSet = null;
+        
+        public X5cBasedJwtDecoder(String jwkSetUri, boolean validateChain, int cacheTtlSeconds) {
+            this.jwkSetUri = jwkSetUri;
+            this.validateChain = validateChain;
+            this.cacheTtlSeconds = cacheTtlSeconds;
+            
+            try {
+                this.certificateFactory = CertificateFactory.getInstance("X.509");
+            } catch (CertificateException e) {
+                throw new RuntimeException("No se pudo inicializar CertificateFactory", e);
+            }
+        }
+        
+        @Override
+        public Jwt decode(String token) throws JwtException {
+            log.debug("════════════════════════════════════════════════");
+            log.debug("🔍 DECODIFICANDO TOKEN CON x5c");
+            log.debug("════════════════════════════════════════════════");
+            
+            try {
+                // 1. Parsear el token JWT
+                SignedJWT signedJWT = SignedJWT.parse(token);
+                String kid = signedJWT.getHeader().getKeyID();
+                
+                if (kid == null) {
+                    throw new JwtException("Token sin 'kid' en el header");
+                }
+                
+                log.info("📌 Token con kid: '{}'", kid);
+                
+                // 2. Obtener el JWK Set (con cache)
+                JWKSet jwkSet = getJwkSet();
+                
+                // 3. Buscar la llave con el kid correcto
+                JWK jwk = jwkSet.getKeyByKeyId(kid);
+                
+                if (jwk == null) {
+                    log.error("❌ No se encontró llave con kid: '{}'", kid);
+                    throw new JwtException("No se encontró llave con kid: " + kid);
+                }
+                
+                log.info("✅ Llave encontrada para kid: '{}'", kid);
+                
+                // 4. Obtener la llave pública desde x5c
+                PublicKey publicKey = getPublicKeyFromX5c(jwk, kid);
+                
+                // 5. Verificar la firma del JWT
+                boolean signatureValid = verifySignature(signedJWT, publicKey);
+                
+                if (!signatureValid) {
+                    log.error("❌ Firma JWT inválida");
+                    throw new JwtException("Firma JWT inválida");
+                }
+                
+                log.info("✅ Firma JWT válida usando certificado x5c");
+                
+                // 6. Construir el objeto Jwt
+                Jwt jwt = createJwt(signedJWT);
+                
+                log.debug("════════════════════════════════════════════════");
+                log.debug("✅ TOKEN VALIDADO EXITOSAMENTE CON x5c");
+                log.debug("════════════════════════════════════════════════");
+                
+                return jwt;
+                
+            } catch (Exception e) {
+                log.error("❌ Error decodificando JWT: {}", e.getMessage());
+                throw new JwtException("Error decodificando JWT con x5c", e);
+            }
+        }
+        
+        /**
+         * Obtiene el JWK Set con cache
+         */
+        private JWKSet getJwkSet() throws Exception {
+            // Verificar si el cache es válido
+            if (cachedJwkSet != null && !cachedJwkSet.isExpired()) {
+                log.debug("📦 Usando JWK Set cacheado");
+                return cachedJwkSet.jwkSet;
+            }
+            
+            // Cargar nuevo JWK Set
+            log.info("🔄 Cargando JWK Set desde: {}", jwkSetUri);
+            
+            String jwkSetJson = restTemplate.getForObject(jwkSetUri, String.class);
+            JWKSet jwkSet = JWKSet.parse(jwkSetJson);
+            
+            // Actualizar cache
+            cachedJwkSet = new CachedJwkSet(jwkSet, cacheTtlSeconds);
+            
+            log.info("✅ JWK Set cargado con {} llaves", jwkSet.getKeys().size());
+            
+            // Log información sobre x5c
+            for (JWK jwk : jwkSet.getKeys()) {
+                List<Base64> x5c = jwk.getX509CertChain();
+                if (x5c != null && !x5c.isEmpty()) {
+                    log.info("  🔑 Kid '{}' tiene {} certificados en x5c", 
+                            jwk.getKeyID(), x5c.size());
+                } else {
+                    log.warn("  ⚠️ Kid '{}' NO tiene x5c", jwk.getKeyID());
+                }
+            }
+            
+            return jwkSet;
+        }
+        
+        /**
+         * Extrae la llave pública desde el campo x5c del JWK
+         */
+        private PublicKey getPublicKeyFromX5c(JWK jwk, String kid) throws Exception {
+            log.info("🔐 Extrayendo llave pública desde x5c para kid: '{}'", kid);
+            
+            // Obtener la cadena de certificados x5c
+            List<Base64> x5cChain = jwk.getX509CertChain();
+            
+            if (x5cChain == null || x5cChain.isEmpty()) {
+                // Si no hay x5c, intentar usar n y e como fallback
+                log.warn("⚠️ JWK sin x5c, intentando usar n y e como fallback");
+                return getFallbackPublicKey(jwk);
+            }
+            
+            log.info("  📋 Procesando cadena de {} certificados", x5cChain.size());
+            
+            // Convertir los certificados Base64 a X509Certificate
+            List<X509Certificate> certificates = new ArrayList<>();
+            
+            for (int i = 0; i < x5cChain.size(); i++) {
+                byte[] certBytes = x5cChain.get(i).decode();
+                X509Certificate cert = (X509Certificate) certificateFactory.generateCertificate(
+                    new ByteArrayInputStream(certBytes)
+                );
+                certificates.add(cert);
+                
+                log.debug("    Cert #{}: Subject: {}", 
+                         i + 1, cert.getSubjectX500Principal().getName());
+                
+                // Información adicional del certificado
+                if (i == 0) {  // Certificado principal (leaf)
+                    log.info("  📅 Válido desde: {} hasta: {}", 
+                            cert.getNotBefore(), cert.getNotAfter());
+                    log.info("  🔒 Algoritmo: {}", cert.getSigAlgName());
+                    log.info("  📝 Serial: {}", cert.getSerialNumber());
+                }
+            }
+            
+            // Validar el certificado principal
+            X509Certificate leafCertificate = certificates.get(0);
+            
+            // Verificar que no esté expirado
+            try {
+                leafCertificate.checkValidity();
+                log.info("  ✅ Certificado válido (no expirado)");
+            } catch (CertificateExpiredException e) {
+                log.error("  ❌ Certificado EXPIRADO: {}", e.getMessage());
+                throw new JwtException("Certificado x5c expirado", e);
+            } catch (CertificateNotYetValidException e) {
+                log.error("  ❌ Certificado aún NO válido: {}", e.getMessage());
+                throw new JwtException("Certificado x5c aún no válido", e);
+            }
+            
+            // Validar la cadena completa si está configurado
+            if (validateChain && certificates.size() > 1) {
+                validateCertificateChain(certificates);
+            }
+            
+            // Obtener la llave pública del certificado
+            PublicKey publicKey = leafCertificate.getPublicKey();
+            
+            if (!(publicKey instanceof RSAPublicKey)) {
+                throw new JwtException("El certificado no contiene una llave RSA");
+            }
+            
+            RSAPublicKey rsaPublicKey = (RSAPublicKey) publicKey;
+            log.info("  ✅ Llave RSA extraída desde x5c");
+            log.info("     - Tamaño: {} bits", rsaPublicKey.getModulus().bitLength());
+            
+            return rsaPublicKey;
+        }
+        
+        /**
+         * Fallback: obtener llave pública desde n y e si no hay x5c
+         */
+        private PublicKey getFallbackPublicKey(JWK jwk) throws Exception {
+            if (jwk.toRSAKey() != null) {
+                return jwk.toRSAKey().toRSAPublicKey();
+            }
+            throw new JwtException("No se pudo obtener llave pública: JWK sin x5c ni datos RSA válidos");
+        }
+        
+        /**
+         * Valida la cadena completa de certificados
+         */
+        private void validateCertificateChain(List<X509Certificate> certificates) throws Exception {
+            log.info("  🔗 Validando cadena de {} certificados", certificates.size());
+            
+            try {
+                // Crear el path de certificación
+                CertPath certPath = certificateFactory.generateCertPath(certificates);
+                
+                // El certificado raíz es el último
+                X509Certificate rootCert = certificates.get(certificates.size() - 1);
+                TrustAnchor trustAnchor = new TrustAnchor(rootCert, null);
+                
+                // Parámetros de validación
+                PKIXParameters params = new PKIXParameters(Collections.singleton(trustAnchor));
+                params.setRevocationEnabled(false);  // Deshabilitar CRL/OCSP por simplicidad
+                
+                // Validar la cadena
+                CertPathValidator validator = CertPathValidator.getInstance("PKIX");
+                validator.validate(certPath, params);
+                
+                log.info("  ✅ Cadena de certificados válida");
+                
+            } catch (CertPathValidatorException e) {
+                log.error("  ❌ Error validando cadena: {}", e.getMessage());
+                throw new JwtException("Cadena de certificados inválida", e);
+            }
+        }
+        
+        /**
+         * Verifica la firma del JWT con la llave pública
+         */
+        private boolean verifySignature(SignedJWT signedJWT, PublicKey publicKey) throws Exception {
+            JWSVerifier verifier = new RSASSAVerifier((RSAPublicKey) publicKey);
+            return signedJWT.verify(verifier);
+        }
+        
+        /**
+         * Construye el objeto Jwt de Spring Security
+         */
+        private Jwt createJwt(SignedJWT signedJWT) throws Exception {
+            // Headers
+            Map<String, Object> headers = new LinkedHashMap<>(signedJWT.getHeader().toJSONObject());
+            
+            // Claims
+            Map<String, Object> claims = new LinkedHashMap<>(signedJWT.getJWTClaimsSet().getClaims());
+            
+            // Timestamps
+            Instant issuedAt = null;
+            Instant expiresAt = null;
+            
+            if (claims.containsKey("iat")) {
+                issuedAt = Instant.ofEpochSecond(((Number) claims.get("iat")).longValue());
+            }
+            
+            if (claims.containsKey("exp")) {
+                expiresAt = Instant.ofEpochSecond(((Number) claims.get("exp")).longValue());
+            }
+            
+            return new Jwt(
+                signedJWT.getParsedString(),
+                issuedAt,
+                expiresAt,
+                headers,
+                claims
+            );
+        }
+        
+        /**
+         * Clase interna para cachear el JWK Set
+         */
+        private static class CachedJwkSet {
+            final JWKSet jwkSet;
+            final long expiryTime;
+            
+            CachedJwkSet(JWKSet jwkSet, int ttlSeconds) {
+                this.jwkSet = jwkSet;
+                this.expiryTime = System.currentTimeMillis() + (ttlSeconds * 1000L);
+            }
+            
+            boolean isExpired() {
+                return System.currentTimeMillis() > expiryTime;
+            }
+        }
+    }
+}
