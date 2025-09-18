@@ -1,0 +1,111 @@
+package mx.com.backend.gateway_service.config;
+
+import com.nimbusds.jose.RemoteKeySourceException;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.JWKSelector;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.jwk.source.RemoteJWKSet;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jose.proc.JWSKeySelector;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+
+import java.net.URL;
+import java.util.List;
+
+/**
+ * Configuración de JwtDecoder con logging detallado
+ * VERÁS LOGS CADA VEZ que llegue un token con diferente KID
+ */
+@Configuration
+public class JwtDecoderWithKidLogging {
+    
+    private static final Logger log = LoggerFactory.getLogger(JwtDecoderWithKidLogging.class);
+    
+    @Value("${spring.security.oauth2.resourceserver.jwt.jwk-set-uri}")
+    private String jwkSetUri;
+
+    /**
+     * JwtDecoder CON LOGGING - Este es el que se usará
+     * Muestra logs CADA VEZ que se valida un token
+     */
+    @Bean
+    @Primary  // <-- IMPORTANTE: Marca este como el principal
+    public JwtDecoder jwtDecoder() throws Exception {
+        log.info("🔧 Configurando JwtDecoder con logging detallado");
+        log.info("📍 JWK Set URI: {}", jwkSetUri);
+        
+        URL jwkSetUrl = new URL(jwkSetUri);
+        
+        // JWKSource personalizado que loguea CADA búsqueda de llave
+        JWKSource<SecurityContext> jwkSource = new RemoteJWKSet<SecurityContext>(jwkSetUrl) {
+            
+            private int requestCount = 0;
+            
+            @Override
+            public List<JWK> get(JWKSelector jwkSelector, SecurityContext context) 
+                    throws RemoteKeySourceException {
+                
+                requestCount++;
+                
+                log.info("╔════════════════════════════════════════════════════════╗");
+                log.info("║         🔍 BÚSQUEDA DE LLAVE #{}                       ║", requestCount);
+                log.info("╠════════════════════════════════════════════════════════╣");
+                
+                // Mostrar qué KID se está buscando
+                if (jwkSelector.getKeyIDs() != null && !jwkSelector.getKeyIDs().isEmpty()) {
+                    log.info("║ 🎯 Token solicita KID: {}                    ", jwkSelector.getKeyIDs().iterator().next());
+                } else {
+                    log.warn("║ ⚠️  Token SIN KID especificado                         ║");
+                }
+                
+                // Obtener las llaves que coinciden
+                List<JWK> matchedKeys = super.get(jwkSelector, context);
+                
+                // Mostrar resultado
+                if (matchedKeys.isEmpty()) {
+                    log.error("║ ❌ NO SE ENCONTRÓ la llave solicitada                  ║");
+                    log.error("║    El KID no existe en el JWK Set                      ║");
+                } else {
+                    for (JWK key : matchedKeys) {
+                        log.info("║ ✅ LLAVE ENCONTRADA:                                   ║");
+                        log.info("║    - KID: {}                          ", key.getKeyID());
+                        log.info("║    - Tipo: {}                                        ", key.getKeyType());
+                        log.info("║    - Algoritmo: {}                                   ", key.getAlgorithm());
+                    }
+                    log.info("║ 📌 Usando SOLO esta llave, ignorando las demás         ║");
+                }
+                
+                log.info("╚════════════════════════════════════════════════════════╝");
+                
+                return matchedKeys;
+            }
+        };
+        
+        // Configurar el processor
+        ConfigurableJWTProcessor<SecurityContext> jwtProcessor = new DefaultJWTProcessor<>();
+        
+        // Configurar el selector de llaves con el algoritmo
+        JWSKeySelector<SecurityContext> jwsKeySelector = 
+            new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, jwkSource);
+        jwtProcessor.setJWSKeySelector(jwsKeySelector);
+        
+        // Crear el decoder
+        NimbusJwtDecoder decoder = new NimbusJwtDecoder(jwtProcessor);
+        
+        log.info("✅ JwtDecoder con logging configurado correctamente");
+        log.info("📝 Verás logs cada vez que llegue un token");
+        
+        return decoder;
+    }
+}
