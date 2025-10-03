@@ -241,3 +241,73 @@ public class VerificarConectividad {
         }
     }
 }
+
+
+import java.sql.*;
+
+public class TestWithKerberos {
+    public static void main(String[] args) {
+        
+        // CONFIGURACIÓN KERBEROS
+        System.setProperty("java.security.krb5.conf", "C:/kerberos/krb5.conf");
+        System.setProperty("javax.security.auth.useSubjectCredsOnly", "false");
+        System.setProperty("sun.security.krb5.debug", "true"); // Para ver detalles
+        
+        String baseDatos = "MiBaseDatos";
+        
+        String[] urls = {
+            // 🔑 OPCIÓN KERBEROS 1: Kerberos explícito
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:1433;databaseName=" + baseDatos + ";integratedSecurity=true;authenticationScheme=JavaKerberos;trustServerCertificate=true",
+            
+            // 🔑 OPCIÓN KERBEROS 2: Con instancia
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV\\TEST:1433;databaseName=" + baseDatos + ";integratedSecurity=true;authenticationScheme=JavaKerberos;trustServerCertificate=true",
+            
+            // 🔑 OPCIÓN KERBEROS 3: Puerto diferente
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:64441;databaseName=" + baseDatos + ";integratedSecurity=true;authenticationScheme=JavaKerberos;trustServerCertificate=true",
+            
+            // ⚠️ OPCIÓN KERBEROS 4: Sin scheme (auto-detect)
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:1433;databaseName=" + baseDatos + ";integratedSecurity=true;trustServerCertificate=true"
+        };
+        
+        String[] descripciones = {
+            "Kerberos Explícito",
+            "Kerberos con Instancia TEST", 
+            "Kerberos Puerto 64441",
+            "Kerberos Auto-Detect"
+        };
+        
+        for (int i = 0; i < urls.length; i++) {
+            try {
+                System.out.println("🔑 Probando KERBEROS: " + descripciones[i]);
+                
+                Connection conn = DriverManager.getConnection(urls[i]);
+                System.out.println("✅ ¡CONEXIÓN KERBEROS EXITOSA!");
+                
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                    "SELECT @@SERVERNAME as server, DB_NAME() as db, SUSER_NAME() as usuario"
+                );
+                
+                if (rs.next()) {
+                    System.out.println("   Servidor: " + rs.getString("server"));
+                    System.out.println("   Base: " + rs.getString("db"));
+                    System.out.println("   Usuario: " + rs.getString("usuario"));
+                }
+                
+                rs.close();
+                stmt.close();
+                conn.close();
+                
+                System.out.println("🎯 URL KERBEROS EXITOSA: " + urls[i].split(";")[0]);
+                break;
+                
+            } catch (SQLException e) {
+                System.err.println("❌ Kerberos falló: " + e.getMessage());
+                if (e.getErrorCode() != 0) {
+                    System.err.println("   Código error: " + e.getErrorCode());
+                }
+            }
+            System.out.println("---");
+        }
+    }
+}
