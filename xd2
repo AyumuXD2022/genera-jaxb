@@ -139,4 +139,3 @@ public class OAuth2AuthenticationEntryPoint implements AuthenticationEntryPoint 
         };
     }
 }
-https://drive.google.com/drive/folders/1UJGpFeVo8dwPY31v7sKU7InmMhsegEnL
