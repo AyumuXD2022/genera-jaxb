@@ -139,3 +139,105 @@ public class OAuth2AuthenticationEntryPoint implements AuthenticationEntryPoint 
         };
     }
 }
+
+
+
+
+import java.sql.*;
+
+public class TestAllConnectionOptions {
+    public static void main(String[] args) {
+        String usuario = "tu_usuario@DEV.XDV";
+        String password = "tu_password";
+        String baseDatos = "MiBaseDatos";
+        
+        // Todas las opciones posibles
+        String[] urls = {
+            // Opción 1: NTLM
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:1433;databaseName=" + baseDatos + ";integratedSecurity=true;authenticationScheme=NTLM;trustServerCertificate=true",
+            
+            // Opción 2: Usuario/Contraseña UPN
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:1433;databaseName=" + baseDatos + ";user=" + usuario + ";password=" + password + ";trustServerCertificate=true",
+            
+            // Opción 3: Usuario/Contraseña dominio\\usuario
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:1433;databaseName=" + baseDatos + ";user=DEV.XDV\\tu_usuario;password=" + password + ";trustServerCertificate=true",
+            
+            // Opción 4: Integrated Security sin scheme
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:1433;databaseName=" + baseDatos + ";integratedSecurity=true;trustServerCertificate=true",
+            
+            // Opción 5: Con instancia (si aplica)
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV\\TEST:1433;databaseName=" + baseDatos + ";integratedSecurity=true;authenticationScheme=NTLM;trustServerCertificate=true",
+            
+            // Opción 6: Puerto diferente
+            "jdbc:sqlserver://FMKLMVFVGL.DEV.XDV:64441;databaseName=" + baseDatos + ";integratedSecurity=true;authenticationScheme=NTLM;trustServerCertificate=true"
+        };
+        
+        String[] descripciones = {
+            "NTLM Authentication",
+            "Usuario/Password (UPN)",
+            "Usuario/Password (dominio\\usuario)", 
+            "Integrated Security Auto",
+            "Con Instancia TEST",
+            "Puerto 64441"
+        };
+        
+        for (int i = 0; i < urls.length; i++) {
+            try {
+                System.out.println("🔄 Probando: " + descripciones[i]);
+                
+                Connection conn = DriverManager.getConnection(urls[i]);
+                System.out.println("✅ ¡CONEXIÓN EXITOSA!");
+                
+                // Verificar conexión
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                    "SELECT @@SERVERNAME as server, DB_NAME() as db, SUSER_NAME() as usuario"
+                );
+                
+                if (rs.next()) {
+                    System.out.println("   Servidor: " + rs.getString("server"));
+                    System.out.println("   Base: " + rs.getString("db"));
+                    System.out.println("   Usuario: " + rs.getString("usuario"));
+                }
+                
+                rs.close();
+                stmt.close();
+                conn.close();
+                
+                System.out.println("🎯 USA ESTA URL: " + urls[i].split(";")[0]);
+                break;
+                
+            } catch (SQLException e) {
+                System.err.println("❌ Falló: " + e.getMessage());
+                if (e.getErrorCode() != 0) {
+                    System.err.println("   Código error: " + e.getErrorCode());
+                }
+            }
+            System.out.println("---");
+        }
+    }
+}
+
+
+// Verificar conectividad básica
+public class VerificarConectividad {
+    public static void main(String[] args) {
+        try {
+            // Verificar si el servidor responde
+            java.net.Socket socket = new java.net.Socket("FMKLMVFVGL.DEV.XDV", 1433);
+            System.out.println("✅ Servidor SQL responde en puerto 1433");
+            socket.close();
+        } catch (Exception e) {
+            System.err.println("❌ No se puede conectar al servidor: " + e.getMessage());
+        }
+        
+        // Probar puerto 64441 también
+        try {
+            java.net.Socket socket = new java.net.Socket("FMKLMVFVGL.DEV.XDV", 64441);
+            System.out.println("✅ Servidor SQL responde en puerto 64441");
+            socket.close();
+        } catch (Exception e) {
+            System.err.println("❌ No responde en puerto 64441: " + e.getMessage());
+        }
+    }
+}
