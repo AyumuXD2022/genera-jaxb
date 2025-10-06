@@ -1,0 +1,224 @@
+package com.empresa.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
+
+@Configuration
+public class DatabaseConfig {
+    
+    // Configuración de tu base de datos
+    private final String hostname = "dbserver01.empresa.local";
+    private final String ip = "192.168.10.25";
+    private final String instancia = "SQLPROD01";
+    private final String baseDatos = "SistemaVentas";
+    private final int puerto = 1433;
+    
+    // Credenciales (solo se usarán si Kerberos no funciona)
+    private final String usuario = "sa";
+    private final String password = "Password123";
+    
+    @Bean
+    public DataSource dataSource() {
+        System.out.println("\n=== DETECTANDO MÉTODO DE AUTENTICACIÓN ===\n");
+        
+        // PRIMERO: Intentar con Kerberos
+        DataSource kerberosDS = intentarKerberos();
+        if (kerberosDS != null) {
+            System.out.println("✅ CONECTADO CON KERBEROS");
+            return kerberosDS;
+        }
+        
+        // SEGUNDO: Si Kerberos falló, usar usuario/password
+        DataSource standardDS = conectarConCredenciales();
+        System.out.println("✅ CONECTADO CON USUARIO/PASSWORD");
+        return standardDS;
+    }
+    
+    private DataSource intentarKerberos() {
+        try {
+            System.out.println("Intentando conexión con Kerberos...");
+            
+            String url = String.format(
+                "jdbc:sqlserver://%s:%d;instanceName=%s;databaseName=%s;" +
+                "integratedSecurity=true;authenticationScheme=JavaKerberos",
+                hostname, puerto, instancia, baseDatos
+            );
+            
+            DataSource ds = DataSourceBuilder.create()
+                .driverClassName("com.microsoft.sqlserver.jdbc.SQLServerDriver")
+                .url(url)
+                .build();
+            
+            // Probar la conexión
+            try (Connection conn = ds.getConnection()) {
+                System.out.println("  ✓ Kerberos funcionó!");
+                return ds;
+            }
+            
+        } catch (Exception e) {
+            System.out.println("  ✗ Kerberos no disponible: " + e.getMessage());
+        }
+        
+        return null;
+    }
+    
+    private DataSource conectarConCredenciales() {
+        System.out.println("Conectando con usuario/password...");
+        
+        String url = String.format(
+            "jdbc:sqlserver://%s:%d;instanceName=%s;databaseName=%s",
+            ip, puerto, instancia, baseDatos
+        );
+        
+        return DataSourceBuilder.create()
+            .driverClassName("com.microsoft.sqlserver.jdbc.SQLServerDriver")
+            .url(url)
+            .username(usuario)
+            .password(password)
+            .build();
+    }
+}
+
+
+package com.empresa.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+public class DatabaseStatusController {
+    
+    @Autowired
+    private DataSource dataSource;
+    
+    @GetMapping("/status")
+    public Map<String, Object> getStatus() {
+        Map<String, Object> info = new HashMap<>();
+        
+        try (Connection conn = dataSource.getConnection()) {
+            DatabaseMetaData meta = conn.getMetaData();
+            
+            // Información de conexión
+            info.put("conectado", true);
+            info.put("url", meta.getURL());
+            info.put("usuario", meta.getUserName());
+            info.put("baseDatos", conn.getCatalog());
+            
+            // Detectar tipo de autenticación
+            String url = meta.getURL();
+            boolean usaKerberos = url.contains("integratedSecurity=true") || 
+                                 url.contains("authenticationScheme=JavaKerberos");
+            
+            info.put("autenticacion", usaKerberos ? "KERBEROS" : "USUARIO/PASSWORD");
+            info.put("tieneKerberos", usaKerberos);
+            
+            // Información del servidor
+            info.put("servidor", meta.getDatabaseProductName());
+            info.put("version", meta.getDatabaseProductVersion());
+            
+            // Prueba de consulta
+            try (ResultSet rs = conn.createStatement()
+                    .executeQuery("SELECT SYSTEM_USER AS Usuario, @@SERVERNAME AS Servidor")) {
+                if (rs.next()) {
+                    info.put("usuarioSQL", rs.getString("Usuario"));
+                    info.put("servidorSQL", rs.getString("Servidor"));
+                }
+            }
+            
+        } catch (Exception e) {
+            info.put("conectado", false);
+            info.put("error", e.getMessage());
+        }
+        
+        return info;
+    }
+    
+    @GetMapping("/test")
+    public String test() {
+        try (Connection conn = dataSource.getConnection()) {
+            String url = conn.getMetaData().getURL();
+            
+            if (url.contains("integratedSecurity=true")) {
+                return "✅ USANDO KERBEROS";
+            } else {
+                return "✅ USANDO USUARIO/PASSWORD";
+            }
+        } catch (Exception e) {
+            return "❌ ERROR: " + e.getMessage();
+        }
+    }
+}
+
+package com.empresa;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import javax.annotation.PostConstruct;
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Autowired;
+
+@SpringBootApplication
+public class Application {
+    
+    @Autowired
+    private DataSource dataSource;
+    
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+    
+    @PostConstruct
+    public void verificar() {
+        try {
+            String url = dataSource.getConnection().getMetaData().getURL();
+            
+            System.out.println("\n=========================================");
+            if (url.contains("integratedSecurity=true")) {
+                System.out.println("✅ TU SISTEMA TIENE KERBEROS");
+                System.out.println("   Estás conectado con Kerberos");
+            } else {
+                System.out.println("❌ TU SISTEMA NO TIENE KERBEROS");
+                System.out.println("   Estás conectado con usuario/password");
+            }
+            System.out.println("=========================================\n");
+            
+        } catch (Exception e) {
+            System.out.println("Error verificando: " + e.getMessage());
+        }
+    }
+}
+
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+        <version>2.7.18</version>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-jdbc</artifactId>
+        <version>2.7.18</version>
+    </dependency>
+    
+    <dependency>
+        <groupId>com.microsoft.sqlserver</groupId>
+        <artifactId>mssql-jdbc</artifactId>
+        <version>6.4.0.jre8</version>
+    </dependency>
+</dependencies>
+
+
+http://localhost:8080/test → Te dice qué autenticación usa
+http://localhost:8080/status → Te da información completa
