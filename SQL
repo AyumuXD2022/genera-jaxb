@@ -91,3 +91,87 @@ SELECT
         WHEN 0 THEN 'NO'
         ELSE 'DESCONOCIDO'
     END;
+
+
+
+import java.sql.*;
+
+public class ConexionConTusDatos {
+    public static void main(String[] args) {
+        // REEMPLAZA CON TUS DATOS REALES
+        String hostname = "TU_HOSTNAME";
+        String ip = "TU_DIRECCION_IP"; 
+        String instancia = "TU_INSTANCIA";
+        String baseDatos = "TU_BASE_DATOS";
+        String usuario = "tu_usuario";
+        String password = "tu_password";
+        int puerto = 456123;  // ← TU PUERTO ESPECÍFICO
+        
+        // Probar diferentes formatos
+        String[] urls = {
+            // Formato 1: Hostname + Puerto específico
+            "jdbc:sqlserver://" + hostname + ":" + puerto + ";databaseName=" + baseDatos + ";trustServerCertificate=true",
+            
+            // Formato 2: IP + Puerto específico
+            "jdbc:sqlserver://" + ip + ":" + puerto + ";databaseName=" + baseDatos + ";trustServerCertificate=true",
+            
+            // Formato 3: Hostname + Instancia + Puerto específico
+            "jdbc:sqlserver://" + hostname + "\\" + instancia + ":" + puerto + ";databaseName=" + baseDatos + ";trustServerCertificate=true",
+            
+            // Formato 4: IP + Instancia + Puerto específico
+            "jdbc:sqlserver://" + ip + "\\" + instancia + ":" + puerto + ";databaseName=" + baseDatos + ";trustServerCertificate=true",
+            
+            // Formato 5: Hostname + Instancia (sin puerto explícito)
+            "jdbc:sqlserver://" + hostname + "\\" + instancia + ";databaseName=" + baseDatos + ";trustServerCertificate=true",
+            
+            // Formato 6: Solo hostname (sin puerto)
+            "jdbc:sqlserver://" + hostname + ";databaseName=" + baseDatos + ";trustServerCertificate=true"
+        };
+        
+        String[] descripciones = {
+            "Hostname + Puerto " + puerto,
+            "IP + Puerto " + puerto, 
+            "Hostname + Instancia + Puerto " + puerto,
+            "IP + Instancia + Puerto " + puerto,
+            "Hostname + Instancia (puerto automático)",
+            "Hostname (puerto automático)"
+        };
+        
+        for (int i = 0; i < urls.length; i++) {
+            try {
+                System.out.println("🔌 Probando: " + descripciones[i]);
+                System.out.println("   URL: " + urls[i]);
+                
+                Connection conn = DriverManager.getConnection(urls[i], usuario, password);
+                System.out.println("✅ ¡CONEXIÓN EXITOSA!");
+                
+                // Verificar conexión
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                    "SELECT @@SERVERNAME as servidor, DB_NAME() as base_datos, @@VERSION as version"
+                );
+                
+                if (rs.next()) {
+                    System.out.println("   Servidor: " + rs.getString("servidor"));
+                    System.out.println("   Base de datos: " + rs.getString("base_datos"));
+                    System.out.println("   Versión SQL: " + rs.getString("version").split("\n")[0]);
+                }
+                
+                rs.close();
+                stmt.close();
+                conn.close();
+                
+                System.out.println("🎯 CONEXIÓN FUNCIONA CON: " + descripciones[i]);
+                System.out.println("🔑 URL EXITOSA: " + urls[i]);
+                break;
+                
+            } catch (SQLException e) {
+                System.err.println("❌ Error: " + e.getMessage());
+                if (e.getErrorCode() != 0) {
+                    System.err.println("   Código error: " + e.getErrorCode() + ", Estado: " + e.getSQLState());
+                }
+            }
+            System.out.println("---");
+        }
+    }
+}
