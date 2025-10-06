@@ -1,0 +1,306 @@
+package com.empresa.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import java.util.*;
+
+@Service
+public class KerberosSQLServerService {
+    
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+    
+    public Map<String, Object> verificarKerberosCompleto() {
+        Map<String, Object> resultado = new LinkedHashMap<>();
+        
+        System.out.println("\n=== VERIFICACIÓN KERBEROS EN SQL SERVER ===\n");
+        
+        // 1. Conexiones Kerberos
+        resultado.put("conexionesKerberos", verificarConexionesKerberos());
+        
+        // 2. Configuración SPN
+        resultado.put("configuracionSPN", verificarSPN());
+        
+        // 3. Cuenta de Servicio
+        resultado.put("cuentaServicio", verificarCuentaServicio());
+        
+        // 4. Modo de Autenticación
+        resultado.put("modoAutenticacion", verificarModoAutenticacion());
+        
+        // 5. Resumen
+        resultado.put("resumen", generarResumen());
+        
+        return resultado;
+    }
+    
+    // 1. VERIFICAR CONEXIONES KERBEROS
+    private Map<String, Object> verificarConexionesKerberos() {
+        Map<String, Object> info = new HashMap<>();
+        
+        // Verificar si existen conexiones Kerberos
+        String sqlExiste = """
+            SELECT COUNT(*) 
+            FROM sys.dm_exec_connections 
+            WHERE auth_scheme = 'KERBEROS'
+            """;
+        
+        Integer kerberosCount = jdbcTemplate.queryForObject(sqlExiste, Integer.class);
+        boolean hayKerberos = kerberosCount != null && kerberosCount > 0;
+        
+        info.put("estado", hayKerberos ? "✅ EXISTEN CONEXIONES KERBEROS" : "❌ NO HAY CONEXIONES KERBEROS");
+        info.put("tieneKerberos", hayKerberos);
+        
+        // Contar por tipo de autenticación
+        String sqlTipos = """
+            SELECT 
+                auth_scheme as esquema,
+                COUNT(*) as conexiones
+            FROM sys.dm_exec_connections 
+            GROUP BY auth_scheme
+            """;
+        
+        List<Map<String, Object>> tiposAuth = jdbcTemplate.queryForList(sqlTipos);
+        info.put("tiposAutenticacion", tiposAuth);
+        
+        System.out.println("1. CONEXIONES KERBEROS: " + info.get("estado"));
+        tiposAuth.forEach(tipo -> 
+            System.out.println("   " + tipo.get("esquema") + ": " + tipo.get("conexiones"))
+        );
+        
+        return info;
+    }
+    
+    // 2. VERIFICAR SPN
+    private Map<String, Object> verificarSPN() {
+        Map<String, Object> info = new HashMap<>();
+        
+        String sql = """
+            SELECT 
+                servicename as servicio,
+                service_principal_name as spn
+            FROM sys.dm_server_services
+            WHERE servicename LIKE 'SQL Server%'
+            """;
+        
+        List<Map<String, Object>> spns = jdbcTemplate.queryForList(sql);
+        
+        boolean spnConfigurado = false;
+        List<Map<String, Object>> detallesSPN = new ArrayList<>();
+        
+        for (Map<String, Object> row : spns) {
+            String spn = (String) row.get("spn");
+            boolean tieneSpn = spn != null && !spn.isEmpty();
+            
+            if (tieneSpn) spnConfigurado = true;
+            
+            Map<String, Object> detalle = new HashMap<>();
+            detalle.put("servicio", row.get("servicio"));
+            detalle.put("spn", spn);
+            detalle.put("estado", tieneSpn ? "✅ SPN CONFIGURADO" : "❌ SPN NO CONFIGURADO");
+            detallesSPN.add(detalle);
+        }
+        
+        info.put("estado", spnConfigurado ? "✅ SPN CONFIGURADO" : "❌ SPN NO CONFIGURADO");
+        info.put("spnConfigurado", spnConfigurado);
+        info.put("detalles", detallesSPN);
+        
+        System.out.println("\n2. CONFIGURACIÓN SPN: " + info.get("estado"));
+        detallesSPN.forEach(d -> 
+            System.out.println("   " + d.get("servicio") + ": " + d.get("spn"))
+        );
+        
+        return info;
+    }
+    
+    // 3. VERIFICAR CUENTA DE SERVICIO
+    private Map<String, Object> verificarCuentaServicio() {
+        Map<String, Object> info = new HashMap<>();
+        
+        String sql = """
+            SELECT 
+                servicename as servicio,
+                service_account as cuenta
+            FROM sys.dm_server_services
+            WHERE servicename LIKE 'SQL Server%'
+            """;
+        
+        List<Map<String, Object>> cuentas = jdbcTemplate.queryForList(sql);
+        
+        boolean esCuentaDominio = false;
+        List<Map<String, Object>> detallesCuentas = new ArrayList<>();
+        
+        for (Map<String, Object> row : cuentas) {
+            String cuenta = (String) row.get("cuenta");
+            boolean esDominio = cuenta != null && 
+                (cuenta.contains("\\") || cuenta.contains("@"));
+            
+            if (esDominio) esCuentaDominio = true;
+            
+            Map<String, Object> detalle = new HashMap<>();
+            detalle.put("servicio", row.get("servicio"));
+            detalle.put("cuenta", cuenta);
+            detalle.put("tipo", esDominio ? "✅ CUENTA DE DOMINIO" : "❌ CUENTA LOCAL");
+            detallesCuentas.add(detalle);
+        }
+        
+        info.put("estado", esCuentaDominio ? "✅ CUENTA DE DOMINIO" : "❌ CUENTA LOCAL");
+        info.put("esCuentaDominio", esCuentaDominio);
+        info.put("detalles", detallesCuentas);
+        
+        System.out.println("\n3. CUENTA DE SERVICIO: " + info.get("estado"));
+        detallesCuentas.forEach(d -> 
+            System.out.println("   " + d.get("servicio") + ": " + d.get("cuenta"))
+        );
+        
+        return info;
+    }
+    
+    // 4. VERIFICAR MODO DE AUTENTICACIÓN
+    private Map<String, Object> verificarModoAutenticacion() {
+        Map<String, Object> info = new HashMap<>();
+        
+        String sql = """
+            SELECT SERVERPROPERTY('IsIntegratedSecurityOnly') as modo
+            """;
+        
+        Integer modo = jdbcTemplate.queryForObject(sql, Integer.class);
+        
+        String modoAuth;
+        if (modo == null) {
+            modoAuth = "❌ DESCONOCIDO";
+        } else if (modo == 1) {
+            modoAuth = "✅ SOLO AUTENTICACIÓN WINDOWS";
+        } else {
+            modoAuth = "✅ AUTENTICACIÓN MIXTA (Windows + SQL)";
+        }
+        
+        info.put("modo", modoAuth);
+        info.put("soloWindows", modo != null && modo == 1);
+        info.put("permiteSQLAuth", modo != null && modo == 0);
+        
+        System.out.println("\n4. MODO DE AUTENTICACIÓN: " + modoAuth);
+        
+        return info;
+    }
+    
+    // 5. GENERAR RESUMEN
+    private Map<String, Object> generarResumen() {
+        Map<String, Object> resumen = new LinkedHashMap<>();
+        
+        // Verificar cada componente
+        boolean hayConexionesKerberos = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sys.dm_exec_connections WHERE auth_scheme = 'KERBEROS'", 
+            Integer.class) > 0;
+        
+        boolean spnConfigurado = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sys.dm_server_services WHERE servicename LIKE 'SQL Server%' AND service_principal_name IS NOT NULL", 
+            Integer.class) > 0;
+        
+        boolean cuentaDominio = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sys.dm_server_services WHERE servicename LIKE 'SQL Server%' AND (service_account LIKE '%\\%' OR service_account LIKE '%@%')", 
+            Integer.class) > 0;
+        
+        // Estado general
+        String estadoGeneral;
+        if (hayConexionesKerberos) {
+            estadoGeneral = "✅ KERBEROS FUNCIONANDO";
+        } else if (spnConfigurado && cuentaDominio) {
+            estadoGeneral = "⚠️ KERBEROS CONFIGURADO PERO SIN CONEXIONES ACTIVAS";
+        } else {
+            estadoGeneral = "❌ KERBEROS NO CONFIGURADO";
+        }
+        
+        resumen.put("estadoGeneral", estadoGeneral);
+        resumen.put("kerberosActivo", hayConexionesKerberos);
+        resumen.put("spnConfigurado", spnConfigurado);
+        resumen.put("cuentaDominio", cuentaDominio);
+        
+        System.out.println("\n5. RESUMEN FINAL:");
+        System.out.println("   " + estadoGeneral);
+        System.out.println("   Conexiones Kerberos: " + (hayConexionesKerberos ? "SÍ" : "NO"));
+        System.out.println("   SPN Configurado: " + (spnConfigurado ? "SÍ" : "NO"));
+        System.out.println("   Cuenta Dominio: " + (cuentaDominio ? "SÍ" : "NO"));
+        System.out.println("\n=====================================\n");
+        
+        return resumen;
+    }
+}
+-----
+package com.empresa.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+import com.empresa.service.KerberosSQLServerService;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/kerberos")
+public class KerberosSQLController {
+    
+    @Autowired
+    private KerberosSQLServerService kerberosService;
+    
+    @GetMapping("/verificar")
+    public Map<String, Object> verificarKerberos() {
+        return kerberosService.verificarKerberosCompleto();
+    }
+    
+    @GetMapping("/status")
+    public Map<String, Object> statusSimple() {
+        Map<String, Object> resultado = kerberosService.verificarKerberosCompleto();
+        Map<String, Object> resumen = (Map<String, Object>) resultado.get("resumen");
+        
+        return Map.of(
+            "kerberosActivo", resumen.get("kerberosActivo"),
+            "estado", resumen.get("estadoGeneral"),
+            "mensaje", resumen.get("kerberosActivo").equals(true) ? 
+                "✅ SQL Server está usando Kerberos" : 
+                "❌ SQL Server NO está usando Kerberos"
+        );
+    }
+}
+
+---
+@Service
+public class KerberosSQLSimpleService {
+    
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+    
+    public String verificarKerberosSimple() {
+        String sqlCompleto = """
+            SELECT 
+                -- Estado Kerberos
+                (SELECT COUNT(*) FROM sys.dm_exec_connections WHERE auth_scheme = 'KERBEROS') as conexiones_kerberos,
+                
+                -- Total de conexiones
+                (SELECT COUNT(*) FROM sys.dm_exec_connections) as total_conexiones,
+                
+                -- SPN configurado
+                (SELECT COUNT(*) FROM sys.dm_server_services 
+                 WHERE servicename LIKE 'SQL Server%' 
+                 AND service_principal_name IS NOT NULL) as spn_configurado,
+                
+                -- Cuenta de dominio
+                (SELECT COUNT(*) FROM sys.dm_server_services 
+                 WHERE servicename LIKE 'SQL Server%' 
+                 AND (service_account LIKE '%\\%' OR service_account LIKE '%@%')) as cuenta_dominio,
+                
+                -- Modo autenticación
+                SERVERPROPERTY('IsIntegratedSecurityOnly') as solo_windows
+            """;
+        
+        Map<String, Object> resultado = jdbcTemplate.queryForMap(sqlCompleto);
+        
+        int kerberosCount = ((Number) resultado.get("conexiones_kerberos")).intValue();
+        boolean tieneKerberos = kerberosCount > 0;
+        
+        if (tieneKerberos) {
+            return String.format("✅ KERBEROS ACTIVO (%d conexiones Kerberos de %d totales)", 
+                kerberosCount, resultado.get("total_conexiones"));
+        } else {
+            return "❌ KERBEROS NO ACTIVO (0 conexiones Kerberos)";
+        }
+    }
+}
