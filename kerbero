@@ -1,0 +1,109 @@
+[libdefaults]
+    default_realm = EMPRESA.LOCAL
+    dns_lookup_realm = false
+    dns_lookup_kdc = false
+    ticket_lifetime = 24h
+    renew_lifetime = 7d
+    forwardable = true
+    default_tgs_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96
+    default_tkt_enctypes = aes256-cts-hmac-sha1-96 aes128-cts-hmac-sha1-96
+
+[realms]
+    EMPRESA.LOCAL = {
+        kdc = kdc01.empresa.local:88
+        kdc = kdc02.empresa.local:88
+        admin_server = kdc01.empresa.local:749
+        default_domain = empresa.local
+    }
+
+[domain_realm]
+    .empresa.local = EMPRESA.LOCAL
+    empresa.local = EMPRESA.LOCAL
+    dbserver01.empresa.local = EMPRESA.LOCAL
+
+
+
+jaas.conf
+
+SQLServerDriver {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useTicketCache=true
+    renewTGT=false
+    doNotPrompt=true
+    useKeyTab=true
+    keyTab="/etc/security/keytabs/sqlserver.keytab"
+    principal="sqlservice/dbserver01.empresa.local@EMPRESA.LOCAL"
+    storeKey=true
+    debug=true;
+};
+
+ClientAuthentication {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useTicketCache=true
+    renewTGT=false
+    doNotPrompt=false
+    useKeyTab=false
+    principal="usuario@EMPRESA.LOCAL"
+    debug=true;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import javax.security.auth.Subject;
+import javax.security.auth.login.LoginContext;
+import javax.security.auth.login.LoginException;
+import java.security.PrivilegedExceptionAction;
+
+public class KerberosDBConnection {
+    
+    private static final String HOSTNAME = "dbserver01.empresa.local";
+    private static final String IP = "192.168.10.25";
+    private static final String INSTANCIA = "SQLPROD01";
+    private static final String BASE_DATOS = "SistemaVentas";
+    private static final int PUERTO = 1433;
+    
+    public Connection conectarConKerberos() throws SQLException, LoginException {
+        // Configurar propiedades del sistema
+        System.setProperty("java.security.krb5.conf", "/etc/krb5.conf");
+        System.setProperty("java.security.auth.login.config", "/etc/jaas.conf");
+        System.setProperty("javax.security.auth.useSubjectCredsOnly", "false");
+        
+        // Crear contexto de login
+        LoginContext lc = new LoginContext("SQLServerDriver");
+        lc.login();
+        
+        // Obtener conexión con privilegios Kerberos
+        Subject subject = lc.getSubject();
+        
+        try {
+            return Subject.doAs(subject, 
+                (PrivilegedExceptionAction<Connection>) () -> {
+                    String url = String.format(
+                        "jdbc:sqlserver://%s:%d;instanceName=%s;databaseName=%s;" +
+                        "integratedSecurity=true;authenticationScheme=JavaKerberos",
+                        HOSTNAME, PUERTO, INSTANCIA, BASE_DATOS
+                    );
+                    
+                    return DriverManager.getConnection(url);
+                }
+            );
+        } catch (Exception e) {
+            throw new SQLException("Error en autenticación Kerberos", e);
+        }
+    }
+}
