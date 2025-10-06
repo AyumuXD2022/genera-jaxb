@@ -175,3 +175,106 @@ public class ConexionConTusDatos {
         }
     }
 }
+
+
+
+import java.sql.*;
+
+public class ConexionKerberosPuertoEspecifico {
+    public static void main(String[] args) {
+        // CONFIGURACIÓN KERBEROS
+        System.setProperty("java.security.krb5.conf", "C:/kerberos/krb5.conf");
+        System.setProperty("javax.security.auth.useSubjectCredsOnly", "false");
+        System.setProperty("sun.security.krb5.debug", "true"); // Para ver detalles
+        
+        // TUS DATOS
+        String hostname = "TU_HOSTNAME";
+        String ip = "TU_DIRECCION_IP";
+        String instancia = "TU_INSTANCIA"; 
+        String baseDatos = "TU_BASE_DATOS";
+        int puerto = 456123; // ← TU PUERTO
+        
+        // Probar diferentes formatos con Kerberos
+        String[] urls = {
+            // Formato 1: Hostname + Puerto específico + Kerberos
+            "jdbc:sqlserver://" + hostname + ":" + puerto + 
+            ";databaseName=" + baseDatos + 
+            ";integratedSecurity=true" +
+            ";authenticationScheme=JavaKerberos" +
+            ";trustServerCertificate=true",
+            
+            // Formato 2: IP + Puerto específico + Kerberos
+            "jdbc:sqlserver://" + ip + ":" + puerto + 
+            ";databaseName=" + baseDatos + 
+            ";integratedSecurity=true" +
+            ";authenticationScheme=JavaKerberos" +
+            ";trustServerCertificate=true",
+            
+            // Formato 3: Hostname + Instancia + Puerto + Kerberos
+            "jdbc:sqlserver://" + hostname + "\\" + instancia + ":" + puerto + 
+            ";databaseName=" + baseDatos + 
+            ";integratedSecurity=true" +
+            ";authenticationScheme=JavaKerberos" +
+            ";trustServerCertificate=true",
+            
+            // Formato 4: Hostname + Instancia + Kerberos (sin puerto)
+            "jdbc:sqlserver://" + hostname + "\\" + instancia + 
+            ";databaseName=" + baseDatos + 
+            ";integratedSecurity=true" +
+            ";authenticationScheme=JavaKerberos" +
+            ";trustServerCertificate=true",
+            
+            // Formato 5: Solo hostname + Kerberos (sin puerto)
+            "jdbc:sqlserver://" + hostname + 
+            ";databaseName=" + baseDatos + 
+            ";integratedSecurity=true" +
+            ";authenticationScheme=JavaKerberos" +
+            ";trustServerCertificate=true"
+        };
+        
+        String[] descripciones = {
+            "Hostname + Puerto " + puerto + " + Kerberos",
+            "IP + Puerto " + puerto + " + Kerberos", 
+            "Hostname + Instancia + Puerto " + puerto + " + Kerberos",
+            "Hostname + Instancia + Kerberos",
+            "Hostname + Kerberos"
+        };
+        
+        for (int i = 0; i < urls.length; i++) {
+            try {
+                System.out.println("🔑 Probando KERBEROS: " + descripciones[i]);
+                System.out.println("   URL: " + urls[i].split(";")[0]);
+                
+                Connection conn = DriverManager.getConnection(urls[i]);
+                System.out.println("✅ ¡CONEXIÓN KERBEROS EXITOSA!");
+                
+                // Verificar conexión
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                    "SELECT @@SERVERNAME as servidor, DB_NAME() as base_datos, SUSER_NAME() as usuario"
+                );
+                
+                if (rs.next()) {
+                    System.out.println("   Servidor: " + rs.getString("servidor"));
+                    System.out.println("   Base de datos: " + rs.getString("base_datos"));
+                    System.out.println("   Usuario Kerberos: " + rs.getString("usuario"));
+                }
+                
+                rs.close();
+                stmt.close();
+                conn.close();
+                
+                System.out.println("🎯 KERBEROS FUNCIONA CON: " + descripciones[i]);
+                System.out.println("🔑 URL EXITOSA: " + urls[i]);
+                break;
+                
+            } catch (SQLException e) {
+                System.err.println("❌ Kerberos falló: " + e.getMessage());
+                if (e.getErrorCode() != 0) {
+                    System.err.println("   Código error: " + e.getErrorCode());
+                }
+            }
+            System.out.println("---");
+        }
+    }
+}
