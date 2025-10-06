@@ -1,0 +1,93 @@
+-- SCRIPT COMPLETO: ESTADO KERBEROS SQL SERVER
+PRINT '=== VERIFICACIÓN COMPLETA KERBEROS ==='
+PRINT ''
+
+-- 1. Verificar conexiones Kerberos
+PRINT '1. CONEXIONES KERBEROS ACTIVAS:'
+SELECT 
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM sys.dm_exec_connections WHERE auth_scheme = 'KERBEROS') 
+        THEN '✅ EXISTEN CONEXIONES KERBEROS'
+        ELSE '❌ NO HAY CONEXIONES KERBEROS'
+    END as estado_kerberos;
+
+SELECT 
+    auth_scheme as esquema,
+    COUNT(*) as conexiones
+FROM sys.dm_exec_connections 
+GROUP BY auth_scheme;
+
+PRINT ''
+
+-- 2. Verificar SPN
+PRINT '2. CONFIGURACIÓN SPN:'
+SELECT 
+    servicename as servicio,
+    service_principal_name as spn,
+    CASE 
+        WHEN service_principal_name IS NOT NULL THEN '✅ SPN CONFIGURADO'
+        ELSE '❌ SPN NO CONFIGURADO'
+    END as estado_spn
+FROM sys.dm_server_services
+WHERE servicename LIKE 'SQL Server%';
+
+PRINT ''
+
+-- 3. Verificar cuenta de servicio
+PRINT '3. CUENTA DE SERVICIO:'
+SELECT 
+    servicename as servicio,
+    service_account as cuenta,
+    CASE 
+        WHEN service_account LIKE '%\%' OR service_account LIKE '%@%' THEN '✅ CUENTA DE DOMINIO'
+        ELSE '❌ CUENTA LOCAL'
+    END as tipo_cuenta
+FROM sys.dm_server_services
+WHERE servicename LIKE 'SQL Server%';
+
+PRINT ''
+
+-- 4. Verificar modo autenticación
+PRINT '4. MODO DE AUTENTICACIÓN:'
+SELECT 
+    CASE SERVERPROPERTY('IsIntegratedSecurityOnly')
+        WHEN 1 THEN '✅ SOLO AUTENTICACIÓN WINDOWS'
+        WHEN 0 THEN '✅ AUTENTICACIÓN MIXTA (Windows + SQL)'
+        ELSE '❌ DESCONOCIDO'
+    END as modo_autenticacion;
+
+PRINT ''
+
+-- 5. RESUMEN FINAL
+PRINT '5. RESUMEN KERBEROS:'
+SELECT 
+    'Estado Kerberos' as item,
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM sys.dm_exec_connections WHERE auth_scheme = 'KERBEROS') 
+        THEN 'FUNCIONANDO'
+        ELSE 'NO FUNCIONANDO'
+    END as estado
+UNION ALL
+SELECT 
+    'SPN Configurado',
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM sys.dm_server_services WHERE servicename LIKE 'SQL Server%' AND service_principal_name IS NOT NULL)
+        THEN 'SI'
+        ELSE 'NO'
+    END
+UNION ALL
+SELECT 
+    'Cuenta Dominio',
+    CASE 
+        WHEN EXISTS (SELECT 1 FROM sys.dm_server_services WHERE servicename LIKE 'SQL Server%' AND (service_account LIKE '%\%' OR service_account LIKE '%@%'))
+        THEN 'SI'
+        ELSE 'NO'
+    END
+UNION ALL
+SELECT 
+    'Solo Windows Auth',
+    CASE SERVERPROPERTY('IsIntegratedSecurityOnly')
+        WHEN 1 THEN 'SI'
+        WHEN 0 THEN 'NO'
+        ELSE 'DESCONOCIDO'
+    END;
