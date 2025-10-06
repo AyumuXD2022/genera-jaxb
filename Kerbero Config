@@ -1,0 +1,67 @@
+package com.empresa.kerberos;
+
+import org.springframework.stereotype.Component;
+import javax.annotation.PostConstruct;
+import javax.security.auth.login.LoginContext;
+import javax.security.auth.Subject;
+import javax.security.auth.kerberos.KerberosTicket;
+
+@Component
+public class KerberosDetector {
+    
+    private boolean tieneKerberos = false;
+    
+    @PostConstruct
+    public void detectar() {
+        tieneKerberos = verificarTicketKerberos();
+        
+        if (tieneKerberos) {
+            System.out.println("✓ KERBEROS DETECTADO");
+        } else {
+            System.out.println("✗ NO HAY KERBEROS");
+        }
+    }
+    
+    private boolean verificarTicketKerberos() {
+        try {
+            // Intentar obtener un ticket Kerberos del cache
+            javax.security.auth.login.Configuration config = 
+                new javax.security.auth.login.Configuration() {
+                    @Override
+                    public javax.security.auth.login.AppConfigurationEntry[] 
+                        getAppConfigurationEntry(String name) {
+                        
+                        java.util.Map<String, String> options = new java.util.HashMap<>();
+                        options.put("useTicketCache", "true");  // Usar ticket existente
+                        options.put("doNotPrompt", "true");     // No pedir password
+                        options.put("renewTGT", "false");
+                        
+                        return new javax.security.auth.login.AppConfigurationEntry[] {
+                            new javax.security.auth.login.AppConfigurationEntry(
+                                "com.sun.security.auth.module.Krb5LoginModule",
+                                javax.security.auth.login.AppConfigurationEntry
+                                    .LoginModuleControlFlag.REQUIRED,
+                                options
+                            )
+                        };
+                    }
+                };
+            
+            LoginContext lc = new LoginContext("", null, null, config);
+            lc.login();
+            
+            Subject subject = lc.getSubject();
+            
+            // Verificar si hay tickets Kerberos
+            return !subject.getPrivateCredentials(KerberosTicket.class).isEmpty();
+            
+        } catch (Exception e) {
+            // Si falla, no hay Kerberos
+            return false;
+        }
+    }
+    
+    public boolean tieneKerberos() {
+        return tieneKerberos;
+    }
+}
