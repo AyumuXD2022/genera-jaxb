@@ -1,0 +1,67 @@
+¡Perfecto! Ahora con el puerto 14564 te actualizo toda la configuración:
+🏢 Tu Configuración Completa:
+Hostname: exampletest.devtest.dev
+Puerto: 14564 ✅
+Dominio: DEVTEST.DEV
+Base de datos: students
+
+
+
+package com.devtest.jdbc;
+
+import java.sql.*;
+
+public class DevTestConnection {
+    
+    // Tu configuración EXACTA
+    private static final String SQL_SERVER = "exampletest.devtest.dev";
+    private static final String DATABASE = "students";
+    private static final String PORT = "14564";  // ✅ Puerto personalizado
+    private static final String SPN = "MSSQLSvc/exampletest.devtest.dev:14564";
+    
+    static {
+        System.setProperty("java.security.krb5.conf", "/etc/krb5.conf");
+        System.setProperty("java.security.krb5.realm", "DEVTEST.DEV");
+        System.setProperty("java.security.krb5.kdc", "kdc.devtest.dev");
+        System.setProperty("sun.security.krb5.debug", "true");
+    }
+    
+    public static void main(String[] args) {
+        String url = String.format(
+            "jdbc:sqlserver://%s:%s;" +
+            "databaseName=%s;" +
+            "integratedSecurity=true;" +
+            "authenticationScheme=JavaKerberos;" +
+            "serverSpn=%s",
+            SQL_SERVER, PORT, DATABASE, SPN
+        );
+        
+        System.out.println("🔗 Conectando a: " + SQL_SERVER + ":" + PORT);
+        System.out.println("🎫 Usando Kerberos (DEVTEST.DEV)");
+        System.out.println("📊 Base de datos: " + DATABASE);
+        
+        try (Connection conn = DriverManager.getConnection(url)) {
+            
+            System.out.println("✅ ¡Conexión exitosa al puerto 14564!");
+            
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(
+                "SELECT SYSTEM_USER, DB_NAME(), @@SERVERNAME, " +
+                "CONNECTIONPROPERTY('local_tcp_port') AS Puerto"
+            );
+            
+            if (rs.next()) {
+                System.out.println("\n📊 Detalles de conexión:");
+                System.out.println("Usuario: " + rs.getString(1));
+                System.out.println("Base de datos: " + rs.getString(2));
+                System.out.println("Servidor: " + rs.getString(3));
+                System.out.println("Puerto conectado: " + rs.getString(4));
+            }
+            
+        } catch (SQLException e) {
+            System.err.println("❌ Error de conexión:");
+            System.err.println("Mensaje: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}
