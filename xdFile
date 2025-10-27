@@ -1,0 +1,133 @@
+import java.io.File;
+import java.io.IOException;
+
+public class Main {
+    
+    public static void main(String[] args) {
+        String fecha = null;
+        String rutaProperties = null;
+        
+        // Parsear argumentos
+        for (int i = 0; i < args.length; i++) {
+            if ("-f".equals(args[i]) && i + 1 < args.length) {
+                fecha = args[i + 1];
+                i++; // Saltar el siguiente valor
+            } else if ("-p".equals(args[i]) && i + 1 < args.length) {
+                rutaProperties = args[i + 1];
+                i++; // Saltar el siguiente valor
+            }
+        }
+        
+        // Validar que se recibieron los parámetros
+        if (fecha == null || rutaProperties == null) {
+            System.err.println("Error: Faltan parámetros requeridos");
+            System.err.println("Uso: java example.jar -f <fecha> -p <ruta_properties>");
+            System.exit(1);
+        }
+        
+        // Validar y sanitizar la ruta para prevenir Path Traversal
+        try {
+            String rutaSegura = validarRutaSegura(rutaProperties);
+            System.out.println("Fecha: " + fecha);
+            System.out.println("Ruta properties (segura): " + rutaSegura);
+            
+            // Aquí puedes usar los valores
+            // cargarProperties(rutaSegura);
+            
+        } catch (SecurityException e) {
+            System.err.println("Error de seguridad: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+    
+    /**
+     * Valida que la ruta no contenga Path Traversal sin restringir a un directorio base
+     */
+    private static String validarRutaSegura(String ruta) throws SecurityException {
+        try {
+            // Normalizar la ruta eliminando . y .. 
+            File archivo = new File(ruta).getCanonicalFile();
+            
+            // 1. Validar que no contenga secuencias de Path Traversal
+            if (ruta.contains("..") || ruta.contains("./")) {
+                throw new SecurityException(
+                    "Ruta inválida: No se permiten referencias relativas (.. o ./)"
+                );
+            }
+            
+            // 2. Verificar que sea un archivo .properties
+            if (!archivo.getName().endsWith(".properties")) {
+                throw new SecurityException(
+                    "Tipo de archivo no permitido: Solo se aceptan archivos .properties"
+                );
+            }
+            
+            // 3. Validar caracteres permitidos en la ruta
+            // Permitir solo: letras, números, /, _, -, .
+            if (!ruta.matches("^[a-zA-Z0-9/_\\-\\.]+$")) {
+                throw new SecurityException(
+                    "Ruta inválida: Contiene caracteres no permitidos"
+                );
+            }
+            
+            // 4. Bloquear rutas sensibles del sistema
+            String rutaLower = archivo.getPath().toLowerCase();
+            String[] rutasProhibidas = {
+                "/etc/", "/passwd", "/shadow", "/root/", 
+                "/sys/", "/proc/", "/boot/", "/dev/",
+                "c:\\windows\\", "c:\\program files"
+            };
+            
+            for (String prohibida : rutasProhibidas) {
+                if (rutaLower.contains(prohibida.toLowerCase())) {
+                    throw new SecurityException(
+                        "Acceso denegado: No se puede acceder a directorios del sistema"
+                    );
+                }
+            }
+            
+            // 5. Verificar que el archivo existe (opcional, según tu caso)
+            if (!archivo.exists()) {
+                throw new SecurityException(
+                    "El archivo no existe: " + archivo.getPath()
+                );
+            }
+            
+            // 6. Verificar permisos de lectura
+            if (!archivo.canRead()) {
+                throw new SecurityException(
+                    "Sin permisos de lectura para: " + archivo.getPath()
+                );
+            }
+            
+            return archivo.getPath();
+            
+        } catch (IOException e) {
+            throw new SecurityException("Error al validar la ruta: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Alternativa: Validación menos restrictiva (solo normalización)
+     */
+    private static String validarRutaBasica(String ruta) throws SecurityException {
+        try {
+            // Solo normalizar y verificar extensión
+            File archivo = new File(ruta).getCanonicalFile();
+            
+            if (!archivo.getName().endsWith(".properties")) {
+                throw new SecurityException("Solo archivos .properties permitidos");
+            }
+            
+            // Detectar intentos obvios de Path Traversal
+            if (ruta.contains("..")) {
+                throw new SecurityException("Secuencia '..' no permitida");
+            }
+            
+            return archivo.getPath();
+            
+        } catch (IOException e) {
+            throw new SecurityException("Error al procesar la ruta: " + e.getMessage());
+        }
+    }
+}
