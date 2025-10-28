@@ -10,30 +10,45 @@ import java.util.Properties;
 public class SecureMain {
     
     public static void main(String[] args) {
-        // ⚠️ NUNCA usar args directamente sin validar
-        // ❌ MAL: new File(args[0])
-        // ✅ BIEN: Validar primero
+        String fechaValidada = null;
+        String rutaValidada = null;
         
         try {
-            // 1. Parsear argumentos de forma segura
-            ArgumentosValidados argumentos = parsearArgumentos(args);
+            // 1. Parsear argumentos sin validar (solo extraer)
+            String fechaRaw = null;
+            String rutaRaw = null;
             
-            // 2. Validar y sanitizar fecha
-            LocalDate fechaSegura = validarFecha(argumentos.getFecha());
+            for (int i = 0; i < args.length; i++) {
+                if ("-f".equals(args[i]) && i + 1 < args.length) {
+                    fechaRaw = args[i + 1];
+                    i++;
+                } else if ("-p".equals(args[i]) && i + 1 < args.length) {
+                    rutaRaw = args[i + 1];
+                    i++;
+                }
+            }
             
-            // 3. Validar y sanitizar ruta (previene Path Traversal)
-            String rutaSegura = validarRuta(argumentos.getRuta());
+            // 2. Validar que se recibieron los parámetros
+            if (fechaRaw == null || rutaRaw == null) {
+                throw new IllegalArgumentException("Faltan parámetros requeridos (-f y -p)");
+            }
             
-            // 4. Ahora es seguro usar los valores
-            System.out.println("✅ Fecha validada: " + fechaSegura);
-            System.out.println("✅ Ruta validada: " + rutaSegura);
+            // 3. Validar y sanitizar fecha - retorna String seguro
+            fechaValidada = validarFecha(fechaRaw);
             
-            // 5. Cargar properties de forma segura
-            Properties props = cargarPropertiesSeguro(rutaSegura);
+            // 4. Validar y sanitizar ruta - retorna String seguro (previene Path Traversal)
+            rutaValidada = validarRuta(rutaRaw);
+            
+            // 5. Ahora es seguro usar los Strings validados
+            System.out.println("✅ Fecha validada: " + fechaValidada);
+            System.out.println("✅ Ruta validada: " + rutaValidada);
+            
+            // 6. Cargar properties de forma segura
+            Properties props = cargarPropertiesSeguro(rutaValidada);
             System.out.println("✅ Properties cargadas: " + props.size() + " entradas");
             
-            // Tu lógica aquí...
-            procesarReporte(fechaSegura, props);
+            // 7. Tu lógica aquí usando los Strings validados
+            procesarReporte(fechaValidada, rutaValidada, props);
             
         } catch (SecurityException e) {
             System.err.println("❌ Error de seguridad: " + e.getMessage());
@@ -49,40 +64,9 @@ public class SecureMain {
     }
     
     /**
-     * Parsea argumentos sin exponer valores sin validar
+     * Valida fecha y retorna String validado
      */
-    private static ArgumentosValidados parsearArgumentos(String[] args) {
-        if (args == null || args.length == 0) {
-            throw new IllegalArgumentException("No se proporcionaron argumentos");
-        }
-        
-        String fecha = null;
-        String ruta = null;
-        
-        for (int i = 0; i < args.length; i++) {
-            // Validar que el flag es seguro antes de procesarlo
-            if (args[i] != null && args[i].matches("^-[a-z]$")) {
-                if ("-f".equals(args[i]) && i + 1 < args.length) {
-                    fecha = args[i + 1];
-                    i++;
-                } else if ("-p".equals(args[i]) && i + 1 < args.length) {
-                    ruta = args[i + 1];
-                    i++;
-                }
-            }
-        }
-        
-        if (fecha == null || ruta == null) {
-            throw new IllegalArgumentException("Faltan parámetros requeridos (-f y -p)");
-        }
-        
-        return new ArgumentosValidados(fecha, ruta);
-    }
-    
-    /**
-     * Valida fecha y previene inyecciones
-     */
-    private static LocalDate validarFecha(String fecha) throws SecurityException {
+    private static String validarFecha(String fecha) throws SecurityException {
         if (fecha == null || fecha.trim().isEmpty()) {
             throw new SecurityException("La fecha no puede estar vacía");
         }
@@ -118,7 +102,8 @@ public class SecureMain {
                 throw new SecurityException("Fecha fuera del rango permitido");
             }
             
-            return fechaParsed;
+            // 6. Retornar String validado en formato normalizado
+            return fechaParsed.toString(); // yyyy-MM-dd
             
         } catch (DateTimeParseException e) {
             throw new SecurityException("Fecha inválida: " + e.getParsedString());
@@ -126,7 +111,7 @@ public class SecureMain {
     }
     
     /**
-     * Valida ruta y previene Path Traversal - CRÍTICO PARA SEGURIDAD
+     * Valida ruta y retorna String validado - CRÍTICO PARA PREVENIR PATH TRAVERSAL
      */
     private static String validarRuta(String ruta) throws SecurityException {
         if (ruta == null || ruta.trim().isEmpty()) {
@@ -199,6 +184,7 @@ public class SecureMain {
                 throw new SecurityException("Archivo muy grande (máx 10MB)");
             }
             
+            // 10. Retornar String con ruta canónica validada
             return archivo.getPath();
             
         } catch (IOException e) {
@@ -207,7 +193,7 @@ public class SecureMain {
     }
     
     /**
-     * Carga properties de forma segura
+     * Carga properties de forma segura usando String validado
      */
     private static Properties cargarPropertiesSeguro(String rutaValidada) throws IOException {
         // rutaValidada ya fue sanitizada, es seguro usarla
@@ -221,14 +207,23 @@ public class SecureMain {
     }
     
     /**
-     * Procesa el reporte (tu lógica de negocio)
+     * Procesa el reporte usando Strings validados
      */
-    private static void procesarReporte(LocalDate fecha, Properties props) {
+    private static void procesarReporte(String fechaValidada, String rutaValidada, Properties props) {
         System.out.println("\n=== PROCESANDO REPORTE ===");
-        System.out.println("Fecha: " + fecha);
+        System.out.println("Fecha: " + fechaValidada);
+        System.out.println("Ruta: " + rutaValidada);
         System.out.println("Configuración cargada desde properties");
         
-        // Tu lógica aquí...
+        // Ejemplo de uso de los valores validados
+        String servidor = props.getProperty("servidor", "localhost");
+        String puerto = props.getProperty("puerto", "8080");
+        
+        System.out.println("Servidor: " + servidor);
+        System.out.println("Puerto: " + puerto);
+        
+        // Tu lógica de negocio aquí...
+        // Puedes usar fechaValidada y rutaValidada con seguridad
     }
     
     /**
@@ -242,28 +237,5 @@ public class SecureMain {
         System.err.println("\nFormatos:");
         System.err.println("  Fecha: yyyy-MM-dd (ej: 2024-10-06)");
         System.err.println("  Ruta:  Absoluta, solo archivos .properties");
-    }
-    
-    /**
-     * Clase inmutable para argumentos validados
-     */
-    private static class ArgumentosValidados {
-        private final String fecha;
-        private final String ruta;
-        
-        public ArgumentosValidados(String fecha, String ruta) {
-            // No validar aquí, solo almacenar
-            // La validación se hace en métodos específicos
-            this.fecha = fecha;
-            this.ruta = ruta;
-        }
-        
-        public String getFecha() {
-            return fecha;
-        }
-        
-        public String getRuta() {
-            return ruta;
-        }
     }
 }
