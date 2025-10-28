@@ -1,133 +1,269 @@
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
+import java.util.Properties;
 
-public class Main {
+public class SecureMain {
     
     public static void main(String[] args) {
-        String fecha = null;
-        String rutaProperties = null;
+        // ⚠️ NUNCA usar args directamente sin validar
+        // ❌ MAL: new File(args[0])
+        // ✅ BIEN: Validar primero
         
-        // Parsear argumentos
-        for (int i = 0; i < args.length; i++) {
-            if ("-f".equals(args[i]) && i + 1 < args.length) {
-                fecha = args[i + 1];
-                i++; // Saltar el siguiente valor
-            } else if ("-p".equals(args[i]) && i + 1 < args.length) {
-                rutaProperties = args[i + 1];
-                i++; // Saltar el siguiente valor
-            }
-        }
-        
-        // Validar que se recibieron los parámetros
-        if (fecha == null || rutaProperties == null) {
-            System.err.println("Error: Faltan parámetros requeridos");
-            System.err.println("Uso: java example.jar -f <fecha> -p <ruta_properties>");
-            System.exit(1);
-        }
-        
-        // Validar y sanitizar la ruta para prevenir Path Traversal
         try {
-            String rutaSegura = validarRutaSegura(rutaProperties);
-            System.out.println("Fecha: " + fecha);
-            System.out.println("Ruta properties (segura): " + rutaSegura);
+            // 1. Parsear argumentos de forma segura
+            ArgumentosValidados argumentos = parsearArgumentos(args);
             
-            // Aquí puedes usar los valores
-            // cargarProperties(rutaSegura);
+            // 2. Validar y sanitizar fecha
+            LocalDate fechaSegura = validarFecha(argumentos.getFecha());
+            
+            // 3. Validar y sanitizar ruta (previene Path Traversal)
+            String rutaSegura = validarRuta(argumentos.getRuta());
+            
+            // 4. Ahora es seguro usar los valores
+            System.out.println("✅ Fecha validada: " + fechaSegura);
+            System.out.println("✅ Ruta validada: " + rutaSegura);
+            
+            // 5. Cargar properties de forma segura
+            Properties props = cargarPropertiesSeguro(rutaSegura);
+            System.out.println("✅ Properties cargadas: " + props.size() + " entradas");
+            
+            // Tu lógica aquí...
+            procesarReporte(fechaSegura, props);
             
         } catch (SecurityException e) {
-            System.err.println("Error de seguridad: " + e.getMessage());
+            System.err.println("❌ Error de seguridad: " + e.getMessage());
+            System.exit(1);
+        } catch (IOException e) {
+            System.err.println("❌ Error de I/O: " + e.getMessage());
+            System.exit(1);
+        } catch (IllegalArgumentException e) {
+            System.err.println("❌ Error en argumentos: " + e.getMessage());
+            mostrarUso();
             System.exit(1);
         }
     }
     
     /**
-     * Valida que la ruta no contenga Path Traversal sin restringir a un directorio base
+     * Parsea argumentos sin exponer valores sin validar
      */
-    private static String validarRutaSegura(String ruta) throws SecurityException {
+    private static ArgumentosValidados parsearArgumentos(String[] args) {
+        if (args == null || args.length == 0) {
+            throw new IllegalArgumentException("No se proporcionaron argumentos");
+        }
+        
+        String fecha = null;
+        String ruta = null;
+        
+        for (int i = 0; i < args.length; i++) {
+            // Validar que el flag es seguro antes de procesarlo
+            if (args[i] != null && args[i].matches("^-[a-z]$")) {
+                if ("-f".equals(args[i]) && i + 1 < args.length) {
+                    fecha = args[i + 1];
+                    i++;
+                } else if ("-p".equals(args[i]) && i + 1 < args.length) {
+                    ruta = args[i + 1];
+                    i++;
+                }
+            }
+        }
+        
+        if (fecha == null || ruta == null) {
+            throw new IllegalArgumentException("Faltan parámetros requeridos (-f y -p)");
+        }
+        
+        return new ArgumentosValidados(fecha, ruta);
+    }
+    
+    /**
+     * Valida fecha y previene inyecciones
+     */
+    private static LocalDate validarFecha(String fecha) throws SecurityException {
+        if (fecha == null || fecha.trim().isEmpty()) {
+            throw new SecurityException("La fecha no puede estar vacía");
+        }
+        
+        // 1. Sanitizar: remover espacios y limitar longitud
+        fecha = fecha.trim();
+        if (fecha.length() > 20) {
+            throw new SecurityException("Fecha con formato inválido (muy larga)");
+        }
+        
+        // 2. Validar caracteres permitidos
+        if (!fecha.matches("^[0-9\\-/]+$")) {
+            throw new SecurityException("La fecha contiene caracteres no permitidos");
+        }
+        
+        // 3. Validar formato específico
+        if (!fecha.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+            throw new SecurityException("Formato de fecha inválido. Use: yyyy-MM-dd");
+        }
+        
+        // 4. Parsear con validación estricta
         try {
-            // Normalizar la ruta eliminando . y .. 
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("uuuu-MM-dd")
+                .withResolverStyle(ResolverStyle.STRICT);
+            
+            LocalDate fechaParsed = LocalDate.parse(fecha, formatter);
+            
+            // 5. Validar rango razonable
+            LocalDate fechaMinima = LocalDate.of(2000, 1, 1);
+            LocalDate fechaMaxima = LocalDate.now().plusYears(1);
+            
+            if (fechaParsed.isBefore(fechaMinima) || fechaParsed.isAfter(fechaMaxima)) {
+                throw new SecurityException("Fecha fuera del rango permitido");
+            }
+            
+            return fechaParsed;
+            
+        } catch (DateTimeParseException e) {
+            throw new SecurityException("Fecha inválida: " + e.getParsedString());
+        }
+    }
+    
+    /**
+     * Valida ruta y previene Path Traversal - CRÍTICO PARA SEGURIDAD
+     */
+    private static String validarRuta(String ruta) throws SecurityException {
+        if (ruta == null || ruta.trim().isEmpty()) {
+            throw new SecurityException("La ruta no puede estar vacía");
+        }
+        
+        // 1. Limitar longitud (DoS prevention)
+        if (ruta.length() > 500) {
+            throw new SecurityException("Ruta demasiado larga");
+        }
+        
+        // 2. CRÍTICO: Bloquear secuencias de Path Traversal
+        if (ruta.contains("..") || ruta.contains("./") || ruta.contains("~")) {
+            throw new SecurityException(
+                "Ruta inválida: No se permiten referencias relativas (.. ./ ~)"
+            );
+        }
+        
+        // 3. Validar caracteres permitidos (whitelist)
+        if (!ruta.matches("^[a-zA-Z0-9/_\\-\\.]+$")) {
+            throw new SecurityException(
+                "Ruta contiene caracteres no permitidos. Solo: [a-zA-Z0-9/_-.]"
+            );
+        }
+        
+        // 4. Normalizar ruta y obtener forma canónica
+        try {
             File archivo = new File(ruta).getCanonicalFile();
             
-            // 1. Validar que no contenga secuencias de Path Traversal
-            if (ruta.contains("..") || ruta.contains("./")) {
-                throw new SecurityException(
-                    "Ruta inválida: No se permiten referencias relativas (.. o ./)"
-                );
-            }
-            
-            // 2. Verificar que sea un archivo .properties
-            if (!archivo.getName().endsWith(".properties")) {
-                throw new SecurityException(
-                    "Tipo de archivo no permitido: Solo se aceptan archivos .properties"
-                );
-            }
-            
-            // 3. Validar caracteres permitidos en la ruta
-            // Permitir solo: letras, números, /, _, -, .
-            if (!ruta.matches("^[a-zA-Z0-9/_\\-\\.]+$")) {
-                throw new SecurityException(
-                    "Ruta inválida: Contiene caracteres no permitidos"
-                );
-            }
-            
-            // 4. Bloquear rutas sensibles del sistema
-            String rutaLower = archivo.getPath().toLowerCase();
+            // 5. Bloquear rutas a directorios del sistema
+            String rutaCanonica = archivo.getPath().toLowerCase();
             String[] rutasProhibidas = {
-                "/etc/", "/passwd", "/shadow", "/root/", 
-                "/sys/", "/proc/", "/boot/", "/dev/",
-                "c:\\windows\\", "c:\\program files"
+                "/etc/", "/passwd", "/shadow", "/root/", "/sys/", 
+                "/proc/", "/boot/", "/dev/", "/var/log/",
+                "c:\\windows\\", "c:\\program files", "c:\\users\\all users"
             };
             
             for (String prohibida : rutasProhibidas) {
-                if (rutaLower.contains(prohibida.toLowerCase())) {
+                if (rutaCanonica.contains(prohibida)) {
                     throw new SecurityException(
-                        "Acceso denegado: No se puede acceder a directorios del sistema"
+                        "Acceso denegado: Directorio del sistema protegido"
                     );
                 }
             }
             
-            // 5. Verificar que el archivo existe (opcional, según tu caso)
-            if (!archivo.exists()) {
+            // 6. Verificar extensión permitida
+            if (!archivo.getName().endsWith(".properties")) {
                 throw new SecurityException(
-                    "El archivo no existe: " + archivo.getPath()
+                    "Solo archivos .properties permitidos"
                 );
             }
             
-            // 6. Verificar permisos de lectura
+            // 7. Verificar que existe y es archivo regular
+            if (!archivo.exists()) {
+                throw new SecurityException("El archivo no existe: " + archivo.getName());
+            }
+            
+            if (!archivo.isFile()) {
+                throw new SecurityException("La ruta no es un archivo regular");
+            }
+            
+            // 8. Verificar permisos de lectura
             if (!archivo.canRead()) {
-                throw new SecurityException(
-                    "Sin permisos de lectura para: " + archivo.getPath()
-                );
+                throw new SecurityException("Sin permisos de lectura");
+            }
+            
+            // 9. Verificar tamaño razonable (prevenir DoS)
+            long maxSize = 10 * 1024 * 1024; // 10 MB
+            if (archivo.length() > maxSize) {
+                throw new SecurityException("Archivo muy grande (máx 10MB)");
             }
             
             return archivo.getPath();
             
         } catch (IOException e) {
-            throw new SecurityException("Error al validar la ruta: " + e.getMessage());
+            throw new SecurityException("Error al validar ruta: " + e.getMessage());
         }
     }
     
     /**
-     * Alternativa: Validación menos restrictiva (solo normalización)
+     * Carga properties de forma segura
      */
-    private static String validarRutaBasica(String ruta) throws SecurityException {
-        try {
-            // Solo normalizar y verificar extensión
-            File archivo = new File(ruta).getCanonicalFile();
-            
-            if (!archivo.getName().endsWith(".properties")) {
-                throw new SecurityException("Solo archivos .properties permitidos");
-            }
-            
-            // Detectar intentos obvios de Path Traversal
-            if (ruta.contains("..")) {
-                throw new SecurityException("Secuencia '..' no permitida");
-            }
-            
-            return archivo.getPath();
-            
-        } catch (IOException e) {
-            throw new SecurityException("Error al procesar la ruta: " + e.getMessage());
+    private static Properties cargarPropertiesSeguro(String rutaValidada) throws IOException {
+        // rutaValidada ya fue sanitizada, es seguro usarla
+        Properties props = new Properties();
+        
+        try (FileInputStream fis = new FileInputStream(rutaValidada)) {
+            props.load(fis);
+        }
+        
+        return props;
+    }
+    
+    /**
+     * Procesa el reporte (tu lógica de negocio)
+     */
+    private static void procesarReporte(LocalDate fecha, Properties props) {
+        System.out.println("\n=== PROCESANDO REPORTE ===");
+        System.out.println("Fecha: " + fecha);
+        System.out.println("Configuración cargada desde properties");
+        
+        // Tu lógica aquí...
+    }
+    
+    /**
+     * Muestra información de uso
+     */
+    private static void mostrarUso() {
+        System.err.println("\nUso:");
+        System.err.println("  java app.jar -f <fecha> -p <ruta_properties>");
+        System.err.println("\nEjemplo:");
+        System.err.println("  java app.jar -f 2024-10-06 -p /app/config/dato.properties");
+        System.err.println("\nFormatos:");
+        System.err.println("  Fecha: yyyy-MM-dd (ej: 2024-10-06)");
+        System.err.println("  Ruta:  Absoluta, solo archivos .properties");
+    }
+    
+    /**
+     * Clase inmutable para argumentos validados
+     */
+    private static class ArgumentosValidados {
+        private final String fecha;
+        private final String ruta;
+        
+        public ArgumentosValidados(String fecha, String ruta) {
+            // No validar aquí, solo almacenar
+            // La validación se hace en métodos específicos
+            this.fecha = fecha;
+            this.ruta = ruta;
+        }
+        
+        public String getFecha() {
+            return fecha;
+        }
+        
+        public String getRuta() {
+            return ruta;
         }
     }
 }
