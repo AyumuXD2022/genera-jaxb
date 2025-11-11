@@ -46,11 +46,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
-      base-path: /  # Cambia de /actuator a /
+        include: "health"
+      base-path: "/"  # Base path vacío
   endpoint:
     health:
       show-details: always
+      show-components: always
+    web:
+      base-path: "/"  # También para el endpoint web
 
 
 
