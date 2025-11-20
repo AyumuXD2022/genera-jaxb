@@ -77,4 +77,19 @@ On that page, please verify your email address and use the following UUID: CEB6A
 
 1b0cbff1-079c-4bf9-beb4-3c528d735820
 
+spring:
+  application:
+    name: actuatordemo
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health"
+      base-path: "/"  # Base path vacío
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+    web:
+      base-path: "/"  # También para el endpoint web
 
